@@ -1,8 +1,52 @@
 import type { Request, Response } from 'express';
+import { randomBytes } from 'node:crypto';
 import pool from '../config/db';
 import { sendResponse } from '../utils/response';
 import bcrypt from 'bcrypt';
 import type { AuthenticatedRequest } from '../middleware/auth';
+
+async function getOrCreateAccountApiKey(userId: number): Promise<string> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      'SELECT api_key FROM users WHERE id = $1 FOR UPDATE',
+      [userId],
+    );
+    const storedKey: unknown = result.rows[0]?.api_key;
+    let apiKey = typeof storedKey === 'string' ? storedKey.trim() : '';
+
+    if (!/^[a-f\d]{64}$/i.test(apiKey)) {
+      apiKey = '';
+    } else {
+      const duplicate = await client.query(
+        'SELECT 1 FROM users WHERE api_key = $1 AND id <> $2 LIMIT 1',
+        [apiKey, userId],
+      );
+      if (duplicate.rows.length > 0) apiKey = '';
+    }
+
+    if (!apiKey) {
+      apiKey = randomBytes(32).toString('hex');
+      const update = await client.query(
+        'UPDATE users SET api_key = $1 WHERE id = $2 RETURNING api_key',
+        [apiKey, userId],
+      );
+      if (typeof update.rows[0]?.api_key !== 'string') {
+        throw new Error('Unable to save the account API key.');
+      }
+    }
+
+    await client.query('COMMIT');
+    return apiKey;
+  } catch (error: unknown) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 export const login = async (req: Request, res: Response) => {
   const { email, password } = req.body as { email?: unknown; password?: unknown };
@@ -37,10 +81,12 @@ export const login = async (req: Request, res: Response) => {
       return sendResponse(res, 'error', 'The password is incorrect.', null, 401);
     }
 
+    const apiKey = await getOrCreateAccountApiKey(user.id);
+
     return sendResponse(res, 'success', 'Login successful', {
       username: user.username,
       type: user.type,
-      api_key: user.api_key,
+      api_key: apiKey,
     });
   } catch (err: unknown) {
     console.error('Login verification failed:', err);

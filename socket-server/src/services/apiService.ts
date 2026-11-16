@@ -1,50 +1,113 @@
-import axios, { AxiosResponse, AxiosError } from "axios";
+import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-export const DB_API_URL = "https://newproject-2wyo.onrender.com/";
+const API_BASE_URL = (
+    process.env.FLIGHT_API_URL ?? "https://newproject-2wyo.onrender.com/api"
+).replace(/\/+$/, "");
 
-// Define a general structure for your API payloads and responses
 export interface ApiPayload {
     type: string;
     api_key?: string;
     server_key?: string;
     flight_id?: string | number;
-    [key: string]: any; // Allows additional dynamic properties
+    latitude?: number;
+    longitude?: number;
+    status?: string;
+    [key: string]: unknown;
 }
 
 export interface ApiResponse {
     status: "success" | "error";
     message?: string;
-    data?: any;
-    [key: string]: any;
+    data?: unknown;
+    timestamp?: number;
 }
 
-// Connect to PHP/Express API
+function getRequestConfig(
+    payload: ApiPayload,
+): AxiosRequestConfig {
+    const apiKey = payload.api_key;
+    const authorization = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+
+    switch (payload.type) {
+        case "Me":
+            return {
+                method: "GET",
+                url: `${API_BASE_URL}/auth/me`,
+                headers: authorization,
+            };
+        case "GetFlight":
+            if (payload.flight_id === undefined) {
+                throw new Error("GetFlight requires flight_id.");
+            }
+            return {
+                method: "GET",
+                url: `${API_BASE_URL}/flights/${encodeURIComponent(String(payload.flight_id))}`,
+                headers: authorization,
+            };
+        case "DispatchFlight":
+            return {
+                method: "POST",
+                url: `${API_BASE_URL}/flights/dispatch`,
+                headers: authorization,
+                data: { flight_id: payload.flight_id },
+            };
+        case "BoardFlight":
+            return {
+                method: "POST",
+                url: `${API_BASE_URL}/flights/board`,
+                headers: authorization,
+                data: { flight_id: payload.flight_id },
+            };
+        case "UpdateFlightPosition":
+            return {
+                method: "POST",
+                url: `${API_BASE_URL}/flights/position`,
+                data: {
+                    server_key: payload.server_key,
+                    flight_id: payload.flight_id,
+                    latitude: payload.latitude,
+                    longitude: payload.longitude,
+                    status: payload.status,
+                },
+            };
+        default:
+            throw new Error(`Unsupported API request type: ${payload.type}`);
+    }
+}
+
 export async function request(payload: ApiPayload): Promise<ApiResponse> {
     try {
-        const response: AxiosResponse<ApiResponse> = await axios.post(DB_API_URL, payload, {
-            headers: {
-                "Content-Type": "application/json",
-            },
+        const response = await axios.request<ApiResponse>({
+            ...getRequestConfig(payload),
+            validateStatus: () => true,
         });
 
-        return response.data;
-    } catch (err: unknown) {
-        const error = err as AxiosError<ApiResponse>;
-        
-        console.log("[API ERROR]", error.message);
-
-        // THIS IS THE IMPORTANT PART - Safely handle Axios error responses
-        if (error.response && error.response.data) {
-            console.log("[API RESPONSE]", error.response.data);
-            return error.response.data;
+        if (
+            typeof response.data === "object"
+            && response.data !== null
+            && (response.data.status === "success" || response.data.status === "error")
+        ) {
+            return response.data;
         }
 
         return {
             status: "error",
-            message: error.message || "API request failed",
+            message: `Flight API returned an unexpected response (${response.status}).`,
+        };
+    } catch (requestError: unknown) {
+        const axiosError = requestError as AxiosError<ApiResponse>;
+        if (axiosError.response?.data) {
+            return axiosError.response.data;
+        }
+
+        return {
+            status: "error",
+            message: requestError instanceof Error
+                ? requestError.message
+                : "Flight API request failed.",
         };
     }
 }

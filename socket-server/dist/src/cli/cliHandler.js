@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.handleCommand = handleCommand;
+//Reads input ()
+const { parseCommand } = require("./commandParser");
+const { routeCommand } = require("./commandRouter");
+function handleCommand(input) {
+    console.log(`[INPUT] ${input}`);
+    const commandObj = parseCommand(input);
+    if (!commandObj) {
+        console.log("[ERROR] Invalid command format");
+        return;
+    }
+    console.log("[PARSED]", commandObj);
+    routeCommand(commandObj);
+}

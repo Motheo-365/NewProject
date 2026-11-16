@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import Loader from '../components/Loader';
 import type { LoginResponse } from '../interfaces/api';
 import { apiService } from '../services/apiService';
+import { socketService } from '../services/socketService';
 
 import '../styles/login.css';
 
@@ -45,15 +46,18 @@ export default function LoginPage() {
       }
 
       const user: LoginResponse = response.data;
-      if (user.type !== 'ATC' && user.type !== 'Passenger') {
+      const normalizedRole = user.type.trim().toUpperCase();
+      if (normalizedRole !== 'ATC' && normalizedRole !== 'PASSENGER') {
         setError(`Unsupported account type: ${user.type}`);
         return;
       }
 
+      const userType = normalizedRole === 'ATC' ? 'ATC' : 'Passenger';
+      socketService.disconnect();
       localStorage.setItem('api_key', user.api_key);
-      localStorage.setItem('user_type', user.type);
+      localStorage.setItem('user_type', userType);
       localStorage.setItem('username', user.username);
-      navigate(user.type === 'ATC' ? '/atc' : '/passenger');
+      navigate(userType === 'ATC' ? '/atc' : '/passenger');
     } catch (loginError: unknown) {
       setError(
         loginError instanceof Error
