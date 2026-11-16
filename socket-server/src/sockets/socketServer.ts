@@ -33,6 +33,7 @@ interface Coordinates {
 
 const flightSimulationTimers = new Map<string | number, NodeJS.Timeout>();
 const FLIGHT_SIMULATION_TICK_MS = 250;
+const SIMULATED_MINUTES_PER_FLIGHT_HOUR = 1;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -302,7 +303,7 @@ async function startFlightSimulation(
     };
 
     const currentTimer = flightSimulationTimers.get(flightId);
-    if (currentTimer) clearInterval(currentTimer);
+    if (currentTimer) clearTimeout(currentTimer);
 
     try {
         const response = await request({
@@ -328,7 +329,10 @@ async function startFlightSimulation(
             throw new Error("Flight route coordinates or duration are invalid.");
         }
 
-        const durationMilliseconds = Math.max(durationHours * 1000, FLIGHT_SIMULATION_TICK_MS);
+        const durationMilliseconds = Math.max(
+            durationHours * SIMULATED_MINUTES_PER_FLIGHT_HOUR * 60_000,
+            FLIGHT_SIMULATION_TICK_MS
+        );
         const startTime = Date.now();
         let reportedPersistenceFailure = false;
         let timer: NodeJS.Timeout | undefined;
