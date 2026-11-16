@@ -45,8 +45,8 @@ function getRequestConfig(payload) {
             return {
                 method: "POST",
                 url: `${API_BASE_URL}/flights/position`,
+                headers: authorization,
                 data: {
-                    server_key: payload.server_key,
                     flight_id: payload.flight_id,
                     latitude: payload.latitude,
                     longitude: payload.longitude,

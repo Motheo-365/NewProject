@@ -10,7 +10,6 @@ const API_BASE_URL = (
 export interface ApiPayload {
     type: string;
     api_key?: string;
-    server_key?: string;
     flight_id?: string | number;
     latitude?: number;
     longitude?: number;
@@ -65,8 +64,8 @@ function getRequestConfig(
             return {
                 method: "POST",
                 url: `${API_BASE_URL}/flights/position`,
+                headers: authorization,
                 data: {
-                    server_key: payload.server_key,
                     flight_id: payload.flight_id,
                     latitude: payload.latitude,
                     longitude: payload.longitude,

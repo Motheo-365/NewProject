@@ -266,7 +266,7 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                 const status = progress >= 1 ? "Landed" : "In Flight";
                 const updateResponse = await (0, apiService_1.request)({
                     type: "UpdateFlightPosition",
-                    server_key: process.env.SERVER_KEY,
+                    api_key: apiKey,
                     flight_id: flightId,
                     latitude: position.latitude,
                     longitude: position.longitude,
