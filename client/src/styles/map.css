@@ -1,0 +1,156 @@
+.flight-map-section {
+  display: grid;
+  gap: 16px;
+  margin: 28px auto;
+  width: min(100%, 1500px);
+  color: #203246;
+  text-align: left;
+}
+
+.flight-map-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.flight-map-heading h2 {
+  margin: 0;
+  color: #172b3d;
+  font-size: 1.4rem;
+}
+
+.flight-map-heading p,
+.flight-map-summary {
+  margin: 6px 0 0;
+  color: #607387;
+  font-size: 0.9rem;
+}
+
+.flight-map-select-label {
+  display: grid;
+  gap: 6px;
+  min-width: min(100%, 280px);
+  color: #30465a;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.flight-map-select-label select {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #cbd8e3;
+  border-radius: 7px;
+  background: #fff;
+  color: #203246;
+  font: inherit;
+}
+
+.flight-map-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 320px;
+  border: 1px solid #d7e2eb;
+  border-radius: 10px;
+  background: #e8f0f5;
+}
+
+.flight-map-canvas {
+  width: 100%;
+  height: min(58vh, 560px);
+  min-height: 320px;
+  z-index: 0;
+}
+
+.flight-map-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  z-index: 500;
+}
+
+.flight-map-error {
+  color: #a52e32;
+}
+
+.flight-map-empty {
+  color: #607387;
+}
+
+.flight-map-warnings {
+  margin: 0;
+  padding: 12px 16px 12px 34px;
+  border: 1px solid #e6c98a;
+  border-radius: 7px;
+  background: #fff8e8;
+  color: #70591e;
+  font-size: 0.9rem;
+}
+
+.flight-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #607387;
+  font-size: 0.85rem;
+}
+
+.flight-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.flight-map-legend i {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(32, 50, 70, 0.25);
+}
+
+.legend-origin {
+  background: #176b9b;
+}
+
+.legend-destination {
+  background: #db8b35;
+}
+
+.legend-current {
+  background: #2a9d72;
+}
+
+.aircraft-position-marker {
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #21865f;
+  box-shadow: 0 2px 7px rgba(20, 45, 62, 0.4);
+}
+
+.aircraft-position-marker svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: #fff;
+  transform-origin: center;
+}
+
+@media (max-width: 640px) {
+  .flight-map-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .flight-map-canvas {
+    height: 55vh;
+    min-height: 280px;
+  }
+}

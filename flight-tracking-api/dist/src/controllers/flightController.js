@@ -227,19 +227,18 @@ const dispatchFlight = async (req, res) => {
         return (0, response_1.sendResponse)(res, 'error', 'user is not authorized to dispatch flights', null, 400);
     }
     try {
-        const checkQuery = "SELECT 1 FROM flights WHERE id = $1 AND status = 'Scheduled'";
-        const checkResult = await db_1.default.query(checkQuery, [flight_id]);
-        if (checkResult.rows.length === 0) {
-            return (0, response_1.sendResponse)(res, 'error', 'no scheduled flight found with that id', null, 400);
-        }
         const timestamp = new Date().toISOString();
         const newStatus = 'Boarding';
         const updateQuery = `
-      UPDATE flights 
+      UPDATE flights
       SET status = $1, dispatched_at = $2
-      WHERE id = $3
+      WHERE id = $3 AND status = 'Scheduled'
+      RETURNING id
     `;
-        await db_1.default.query(updateQuery, [newStatus, timestamp, flight_id]);
+        const updateResult = await db_1.default.query(updateQuery, [newStatus, timestamp, flight_id]);
+        if (updateResult.rowCount === 0) {
+            return (0, response_1.sendResponse)(res, 'error', 'no scheduled flight found with that id', null, 400);
+        }
         return (0, response_1.sendResponse)(res, 'success', 'flight has been successfully dispatched and is now boarding');
     }
     catch (err) {

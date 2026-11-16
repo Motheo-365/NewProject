@@ -1,31 +1,22 @@
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router';
-import LoginPage from '../pages/login'; // Adjust path if needed
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import type { ReactNode } from 'react';
+import LoginPage from '../pages/login';
+import AtcPage from '../pages/atc';
+import Map from '../components/map';
 
-function RolePage({ role }: { role: 'ATC' | 'Passenger' }) {
-  const navigate = useNavigate();
+function RolePage({ role, children }: { role: 'ATC' | 'Passenger'; children?: ReactNode }) {
   const apiKey = localStorage.getItem('api_key');
   const userType = localStorage.getItem('user_type');
-  const username = localStorage.getItem('username');
 
-  if (!apiKey) return <Navigate to="/" replace />;
+  if (!apiKey || (userType !== 'ATC' && userType !== 'Passenger')) {
+    return <Navigate to="/" replace />;
+  }
+
   if (userType !== role) {
     return <Navigate to={userType === 'ATC' ? '/atc' : '/passenger'} replace />;
   }
 
-  function handleLogout() {
-    localStorage.clear();
-    navigate('/', { replace: true });
-  }
-
-  return (
-    <main style={{ padding: '20px' }}>
-      <h1>{role === 'ATC' ? 'ATC Dashboard' : 'Passenger Dashboard'}</h1>
-      <p>Welcome, {username}.</p>
-      <button type="button" onClick={handleLogout} style={{ padding: '8px 16px', background: '#dc3545', color: 'white', border: 'none' }}>
-        Log out
-      </button>
-    </main>
-  );
+  return <>{children}</>;
 }
 
 export function Router() {
@@ -33,8 +24,15 @@ export function Router() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LoginPage />} />
-        <Route path="/atc" element={<RolePage role="ATC" />} />
-        <Route path="/passenger" element={<RolePage role="Passenger" />} />
+        <Route path="/atc" element={<RolePage role="ATC"><AtcPage /></RolePage>} />
+        <Route
+          path="/passenger"
+          element={(
+            <RolePage role="Passenger">
+              <Map apiKey={localStorage.getItem('api_key') ?? ''} />
+            </RolePage>
+          )}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
