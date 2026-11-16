@@ -253,22 +253,19 @@ export const dispatchFlight = async (req: AuthenticatedRequest, res: Response) =
   }
 
   try {
-    const checkQuery = "SELECT 1 FROM flights WHERE id = $1 AND status = 'Scheduled'";
-    const checkResult = await pool.query(checkQuery, [flight_id]);
-
-    if (checkResult.rows.length === 0) {
-      return sendResponse(res, 'error', 'no scheduled flight found with that id', null, 400);
-    }
-
     const timestamp = new Date().toISOString();
     const newStatus = 'Boarding';
-
     const updateQuery = `
-      UPDATE flights 
+      UPDATE flights
       SET status = $1, dispatched_at = $2
-      WHERE id = $3
+      WHERE id = $3 AND status = 'Scheduled'
+      RETURNING id
     `;
-    await pool.query(updateQuery, [newStatus, timestamp, flight_id]);
+    const updateResult = await pool.query(updateQuery, [newStatus, timestamp, flight_id]);
+
+    if (updateResult.rowCount === 0) {
+      return sendResponse(res, 'error', 'no scheduled flight found with that id', null, 400);
+    }
 
     return sendResponse(res, 'success', 'flight has been successfully dispatched and is now boarding');
   } catch (err: any) {

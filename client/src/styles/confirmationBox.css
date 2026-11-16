@@ -1,0 +1,134 @@
+.confirmation-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 35, 51, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.confirmation-box {
+  width: min(100%, 440px);
+  padding: clamp(24px, 5vw, 32px);
+  border: 1px solid #d5e0e8;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(13, 39, 59, 0.28);
+  color: #23384a;
+  font-family: var(--font-body, "Segoe UI", sans-serif);
+  animation: confirmation-enter 160ms ease-out;
+}
+
+.confirmation-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: #2874a6;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.confirmation-box h2 {
+  margin: 0 0 10px;
+  color: #172f43;
+  font-size: clamp(1.25rem, 4vw, 1.55rem);
+  line-height: 1.25;
+}
+
+.confirmation-box p {
+  margin: 0;
+  color: #5b6e7d;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.confirmation-button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.confirmation-button:focus-visible {
+  outline: 3px solid rgba(40, 116, 166, 0.3);
+  outline-offset: 2px;
+}
+
+.confirmation-button-secondary {
+  border-color: #cbd8e2;
+  background: #fff;
+  color: #40586b;
+}
+
+.confirmation-button-secondary:hover {
+  border-color: #9eb4c5;
+  background: #f3f7fa;
+}
+
+.confirmation-button-default {
+  background: #176b9b;
+  color: #fff;
+}
+
+.confirmation-button-default:hover {
+  background: #12577f;
+}
+
+.confirmation-button-danger {
+  background: #b83c42;
+  color: #fff;
+}
+
+.confirmation-button-danger:hover {
+  background: #962d33;
+}
+
+@keyframes confirmation-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 420px) {
+  .confirmation-actions {
+    flex-direction: column-reverse;
+  }
+
+  .confirmation-button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirmation-box {
+    animation: none;
+  }
+
+  .confirmation-button {
+    transition: none;
+  }
+}
