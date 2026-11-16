@@ -18,7 +18,7 @@ export function routeCommand({ command, args }: { command: string; args: any }) 
             break;
 
         default:
-            console.log("[ROUTED] → unknown command");
+            console.log("[ROUTED] → Unkown Command");
             break;
     }
 }
