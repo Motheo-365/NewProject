@@ -75,5 +75,10 @@ export interface FlightsData {
 export interface LoginResponse {
   username: string;
   type: string;
-  api_key: string
+  api_key: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
 }
