@@ -19,6 +19,63 @@ function isApiResponse(value: unknown): value is ApiResponse<unknown> {
     && (value.message === undefined || typeof value.message === 'string');
 }
 
+function readFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readFlightUpdate(value: Record<string, unknown>): SocketServerMessage | null {
+  const responseData = isRecord(value.data) ? value.data : {};
+  const data = isRecord(responseData.data) ? responseData.data : responseData;
+  const currentPosition = [
+    value.current_position,
+    value.currentPosition,
+    responseData.current_position,
+    responseData.currentPosition,
+    data.current_position,
+    data.currentPosition,
+  ].find(isRecord) ?? {};
+  const rawFlightId = value.flightId ?? value.flight_id ?? value.id
+    ?? data.flightId ?? data.flight_id ?? data.id;
+  const rawLatitude = value.latitude ?? value.lat ?? value.current_latitude
+    ?? data.latitude ?? data.lat ?? data.current_latitude
+    ?? currentPosition.latitude ?? currentPosition.lat ?? currentPosition.current_latitude;
+  const rawLongitude = value.longitude ?? value.lng ?? value.current_longitude
+    ?? data.longitude ?? data.lng ?? data.current_longitude
+    ?? currentPosition.longitude ?? currentPosition.lng ?? currentPosition.current_longitude;
+  const flightId = readFiniteNumber(rawFlightId);
+  const latitude = readFiniteNumber(rawLatitude);
+  const longitude = readFiniteNumber(rawLongitude);
+  const status = value.status ?? data.status;
+
+  if (
+    flightId === null
+    || !Number.isInteger(flightId)
+    || latitude === null
+    || latitude < -90
+    || latitude > 90
+    || longitude === null
+    || longitude < -180
+    || longitude > 180
+    || typeof status !== 'string'
+    || !status.trim()
+  ) {
+    return null;
+  }
+
+  return {
+    type: 'FLIGHT_UPDATE',
+    flightId,
+    latitude,
+    longitude,
+    status,
+  };
+}
+
 function parseServerMessage(value: unknown): SocketServerMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
 
@@ -40,18 +97,7 @@ function parseServerMessage(value: unknown): SocketServerMessage | null {
         : null;
     case 'FLIGHT_UPDATE':
     case 'flight_update':
-      return typeof value.flightId === 'number'
-        && typeof value.latitude === 'number'
-        && typeof value.longitude === 'number'
-        && typeof value.status === 'string'
-        ? {
-            type: value.type,
-            flightId: value.flightId,
-            latitude: value.latitude,
-            longitude: value.longitude,
-            status: value.status,
-          }
-        : null;
+      return readFlightUpdate(value);
     case 'DISPATCH_RESULT':
     case 'BOARD_RESULT':
       return isApiResponse(value.data)
@@ -105,7 +151,6 @@ class SocketService {
         this.emit('TRACK_SUCCESS', message);
         break;
       case 'FLIGHT_UPDATE':
-      case 'flight_update':
         this.emit('FLIGHT_UPDATE', message);
         break;
       case 'DISPATCH_RESULT':
@@ -171,7 +216,10 @@ class SocketService {
     });
 
     socket.addEventListener('close', () => {
-      if (this.socket === socket) this.socket = null;
+      if (this.socket === socket) {
+        this.socket = null;
+        this.emit('SOCKET_CLOSED', { type: 'SOCKET_CLOSED' });
+      }
       console.log('WebSocket connection closed');
     });
 

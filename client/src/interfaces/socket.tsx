@@ -37,7 +37,7 @@ export interface AuthFailedMessage {
 }
 
 export interface FlightUpdateMessage {
-    type: 'FLIGHT_UPDATE' | 'flight_update';
+    type: 'FLIGHT_UPDATE';
     flightId: number;
     latitude: number;
     longitude: number;
@@ -80,6 +80,10 @@ export interface KilledMessage {
     message: string;
 }
 
+export interface SocketClosedMessage {
+    type: 'SOCKET_CLOSED';
+}
+
 export type SocketServerMessage =
     | AuthSuccessMessage
     | AuthFailedMessage
@@ -103,4 +107,5 @@ export interface SocketEventMap {
     BOARDING_CONFIRMED: BoardingConfirmedMessage;
     ERROR: ErrorMessage;
     KILLED: KilledMessage;
+    SOCKET_CLOSED: SocketClosedMessage;
 }
