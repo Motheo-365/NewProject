@@ -345,7 +345,7 @@ async function startFlightSimulation(
 
                 const updateResponse = await request({
                     type: "UpdateFlightPosition",
-                    server_key: process.env.SERVER_KEY,
+                    api_key: apiKey,
                     flight_id: flightId,
                     latitude: position.latitude,
                     longitude: position.longitude,

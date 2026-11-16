@@ -274,19 +274,12 @@ export const dispatchFlight = async (req: AuthenticatedRequest, res: Response) =
 };
 
 /**
- * Update Flight Position & Status (Server/Tracker Key Authorized)
+ * Update Flight Position & Status (ATC API key authorized)
  */
 export const updateFlightPosition = async (req: AuthenticatedRequest, res: Response) => {
-  const { server_key, flight_id, latitude, longitude, status } = req.body;
-  const expectedServerKey = process.env.SERVER_KEY;
-
-  if (!expectedServerKey) {
-    console.error('SERVER_KEY is not configured for flight position updates.');
-    return sendResponse(res, 'error', 'flight position updates are not configured', null, 500);
-  }
-
-  if (typeof server_key !== 'string' || server_key !== expectedServerKey) {
-    return sendResponse(res, 'error', 'unauthorized', null, 403);
+  const { flight_id, latitude, longitude, status } = req.body;
+  if (req.user?.type !== 'ATC') {
+    return sendResponse(res, 'error', 'only ATC users can update flight positions', null, 403);
   }
 
   if (
