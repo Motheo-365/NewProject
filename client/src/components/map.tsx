@@ -37,6 +37,7 @@ function Map({ apiKey, activeFlight }: MapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const flightLayersRef = useRef<L.LayerGroup | null>(null);
   const currentPositionMarkerRef = useRef<L.Marker | null>(null);
+  const positionAnimationFrameRef = useRef<number | null>(null);
   const [flights, setFlights] = useState<Flight[]>([]);
   const [localSelectedFlightId, setLocalSelectedFlightId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
@@ -186,6 +187,10 @@ function Map({ apiKey, activeFlight }: MapProps) {
     const layers = flightLayersRef.current;
     if (!map || !layers) return;
 
+    if (positionAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(positionAnimationFrameRef.current);
+      positionAnimationFrameRef.current = null;
+    }
     layers.clearLayers();
     currentPositionMarkerRef.current = null;
     if (!selectedRoute?.geometry || !selectedRoute.origin || !selectedRoute.destination) return;
@@ -253,7 +258,47 @@ function Map({ apiKey, activeFlight }: MapProps) {
         .bindPopup(`<strong>${selectedRoute.flightNumber}</strong><br>Current aircraft position`)
         .addTo(layers);
     } else {
-      currentPositionMarkerRef.current.setLatLng([currentLatitude, currentLongitude]);
+      const marker = currentPositionMarkerRef.current;
+      const start = marker.getLatLng();
+      const startedAt = performance.now();
+      const animationDuration = 400;
+
+      const animatePosition = (now: number) => {
+        const progress = Math.min((now - startedAt) / animationDuration, 1);
+        const latitude = start.lat + (currentLatitude - start.lat) * progress;
+        const longitude = start.lng + (currentLongitude - start.lng) * progress;
+
+        marker.setLatLng([latitude, longitude]);
+
+        if (
+          typeof destinationLatitude === 'number'
+          && typeof destinationLongitude === 'number'
+        ) {
+          const bearing = getBearingDegrees(
+            latitude,
+            longitude,
+            destinationLatitude,
+            destinationLongitude,
+          );
+          const planeIcon = marker.getElement()?.querySelector('svg');
+          if (planeIcon) planeIcon.style.transform = `rotate(${bearing}deg)`;
+        }
+
+        if (progress < 1) {
+          positionAnimationFrameRef.current = requestAnimationFrame(animatePosition);
+        } else {
+          positionAnimationFrameRef.current = null;
+        }
+      };
+
+      positionAnimationFrameRef.current = requestAnimationFrame(animatePosition);
+
+      return () => {
+        if (positionAnimationFrameRef.current !== null) {
+          cancelAnimationFrame(positionAnimationFrameRef.current);
+          positionAnimationFrameRef.current = null;
+        }
+      };
     }
 
     if (

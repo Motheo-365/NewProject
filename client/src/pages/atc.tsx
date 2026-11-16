@@ -35,6 +35,7 @@ export default function AtcPage() {
   const flightsRef = useRef(flights);
   const selectedFlightRef = useRef(selectedFlight);
   const selectedFlightIdRef = useRef<number | null>(null);
+  const trackedFlightIdsRef = useRef(new Set<number>());
   const boardingTimersRef = useRef(new Map<number, number>());
   const boardingDeadlinesRef = useRef(new Map<number, number>());
   const boardingStatusesRef = useRef(new Map<number, Map<string, boolean>>());
@@ -169,6 +170,7 @@ export default function AtcPage() {
     });
 
     const unsubscribeTracking = socketService.on('TRACK_SUCCESS', (message) => {
+      trackedFlightIdsRef.current.add(message.flightId);
       if (selectedFlightIdRef.current === message.flightId) {
         setIsTracking(true);
       }
@@ -254,7 +256,15 @@ export default function AtcPage() {
 
     const unsubscribeAuthFailed = socketService.on('AUTH_FAILED', (message) => {
       setIsSocketConnected(false);
+      trackedFlightIdsRef.current.clear();
+      setIsTracking(false);
       addNotification(`Live connection authentication failed: ${message.message}`);
+    });
+
+    const unsubscribeSocketClosed = socketService.on('SOCKET_CLOSED', () => {
+      setIsSocketConnected(false);
+      trackedFlightIdsRef.current.clear();
+      setIsTracking(false);
     });
 
     const unsubscribeSocketError = socketService.on('ERROR', (message) => {
@@ -269,6 +279,7 @@ export default function AtcPage() {
       unsubscribeBoardingCall();
       unsubscribeBoardingConfirmed();
       unsubscribeAuthFailed();
+      unsubscribeSocketClosed();
       unsubscribeSocketError();
       unsubscribeAuthSuccess();
       boardingTimers.forEach((timer) => window.clearTimeout(timer));
@@ -290,7 +301,7 @@ export default function AtcPage() {
   const selectFlight = async (flight: Flight) => {
     selectedFlightIdRef.current = flight.id;
     setSelectedFlight(flight);
-    setIsTracking(false);
+    setIsTracking(trackedFlightIdsRef.current.has(flight.id));
     const deadline = boardingDeadlinesRef.current.get(flight.id);
     setBoardingCountdown(deadline ? getRemainingSeconds(deadline) : 0);
 
