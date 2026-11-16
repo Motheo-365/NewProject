@@ -251,10 +251,24 @@ exports.dispatchFlight = dispatchFlight;
  */
 const updateFlightPosition = async (req, res) => {
     const { server_key, flight_id, latitude, longitude, status } = req.body;
-    if (server_key !== 'ourSecretServerKey#') {
+    const expectedServerKey = process.env.SERVER_KEY;
+    if (!expectedServerKey) {
+        console.error('SERVER_KEY is not configured for flight position updates.');
+        return (0, response_1.sendResponse)(res, 'error', 'flight position updates are not configured', null, 500);
+    }
+    if (typeof server_key !== 'string' || server_key !== expectedServerKey) {
         return (0, response_1.sendResponse)(res, 'error', 'unauthorized', null, 403);
     }
-    if (!flight_id || latitude === undefined || longitude === undefined) {
+    if ((typeof flight_id !== 'number' && typeof flight_id !== 'string')
+        || !String(flight_id).trim()
+        || typeof latitude !== 'number'
+        || !Number.isFinite(latitude)
+        || latitude < -90
+        || latitude > 90
+        || typeof longitude !== 'number'
+        || !Number.isFinite(longitude)
+        || longitude < -180
+        || longitude > 180) {
         return (0, response_1.sendResponse)(res, 'error', 'missing required fields', null, 400);
     }
     const validStatuses = ['Scheduled', 'Boarding', 'In Flight', 'Landed'];
@@ -268,21 +282,21 @@ const updateFlightPosition = async (req, res) => {
         SET current_latitude = $1, current_longitude = $2, status = $3
         WHERE id = $4
       `;
-            await db_1.default.query(query, [latitude, longitude, status, flight_id]);
+            const result = await db_1.default.query(query, [latitude, longitude, status, flight_id]);
+            if (result.rowCount === 0) {
+                return (0, response_1.sendResponse)(res, 'error', 'flight not found', null, 404);
+            }
         }
         else {
-            const query = `
-        UPDATE flights 
-        SET current_latitude = $1, current_longitude = $2
-        WHERE id = $2
-      `; // Wait, check parameter mapping:
-            // Correct parameter mapping below:
             const queryWithoutStatus = `
         UPDATE flights 
         SET current_latitude = $1, current_longitude = $2
         WHERE id = $3
       `;
-            await db_1.default.query(queryWithoutStatus, [latitude, longitude, flight_id]);
+            const result = await db_1.default.query(queryWithoutStatus, [latitude, longitude, flight_id]);
+            if (result.rowCount === 0) {
+                return (0, response_1.sendResponse)(res, 'error', 'flight not found', null, 404);
+            }
         }
         return (0, response_1.sendResponse)(res, 'success', 'flight position updated');
     }
