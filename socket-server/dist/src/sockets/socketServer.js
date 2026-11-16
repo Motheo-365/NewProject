@@ -9,6 +9,7 @@ const logger_1 = require("../utils/logger");
 const apiService_1 = require("../services/apiService");
 const serverState_1 = require("../state/serverState");
 const flightSimulationTimers = new Map();
+const FLIGHT_SIMULATION_TICK_MS = 250;
 function isRecord(value) {
     return typeof value === "object" && value !== null;
 }
@@ -253,10 +254,12 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
             || durationHours <= 0) {
             throw new Error("Flight route coordinates or duration are invalid.");
         }
-        const durationMilliseconds = durationHours * 60 * 60 * 1000;
+        const durationMilliseconds = Math.max(durationHours * 1000, FLIGHT_SIMULATION_TICK_MS);
         const startTime = Date.now();
         let updateInProgress = false;
-        const timer = setInterval(async () => {
+        let reportedPersistenceFailure = false;
+        let timer;
+        const updatePosition = async () => {
             if (updateInProgress)
                 return;
             updateInProgress = true;
@@ -285,7 +288,13 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                     status
                 });
                 if (updateResponse.status !== "success") {
-                    throw new Error(updateResponse.message || "Flight position update was rejected.");
+                    if (!reportedPersistenceFailure) {
+                        reportFailure(`Flight ${flightId} is moving, but its position could not be saved: ${updateResponse.message || "position update was rejected."}`);
+                        reportedPersistenceFailure = true;
+                    }
+                }
+                else {
+                    reportedPersistenceFailure = false;
                 }
                 if (progress >= 1) {
                     clearInterval(timer);
@@ -294,15 +303,20 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                 }
             }
             catch (simulationError) {
-                reportFailure(`Flight ${flightId} simulation failed: ${simulationError instanceof Error ? simulationError.message : "unknown error"}`);
-                clearInterval(timer);
-                flightSimulationTimers.delete(flightId);
+                if (!reportedPersistenceFailure) {
+                    reportFailure(`Flight ${flightId} is moving, but its position could not be saved: ${simulationError instanceof Error ? simulationError.message : "unknown error"}`);
+                    reportedPersistenceFailure = true;
+                }
             }
             finally {
                 updateInProgress = false;
             }
-        }, 2000);
+        };
+        timer = setInterval(() => {
+            void updatePosition();
+        }, FLIGHT_SIMULATION_TICK_MS);
         flightSimulationTimers.set(flightId, timer);
+        void updatePosition();
     }
     catch (simulationError) {
         reportFailure(`Unable to start simulation for flight ${flightId}: ${simulationError instanceof Error ? simulationError.message : "unknown error"}`);

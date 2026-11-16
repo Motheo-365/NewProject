@@ -32,6 +32,7 @@ interface Coordinates {
 }
 
 const flightSimulationTimers = new Map<string | number, NodeJS.Timeout>();
+const FLIGHT_SIMULATION_TICK_MS = 250;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -327,10 +328,13 @@ async function startFlightSimulation(
             throw new Error("Flight route coordinates or duration are invalid.");
         }
 
-        const durationMilliseconds = durationHours * 60 * 60 * 1000;
+        const durationMilliseconds = Math.max(durationHours * 1000, FLIGHT_SIMULATION_TICK_MS);
         const startTime = Date.now();
         let updateInProgress = false;
-        const timer = setInterval(async () => {
+        let reportedPersistenceFailure = false;
+        let timer: NodeJS.Timeout;
+
+        const updatePosition = async () => {
             if (updateInProgress) return;
             updateInProgress = true;
 
@@ -361,7 +365,16 @@ async function startFlightSimulation(
                     status
                 });
                 if (updateResponse.status !== "success") {
-                    throw new Error(updateResponse.message || "Flight position update was rejected.");
+                    if (!reportedPersistenceFailure) {
+                        reportFailure(
+                            `Flight ${flightId} is moving, but its position could not be saved: ${
+                                updateResponse.message || "position update was rejected."
+                            }`,
+                        );
+                        reportedPersistenceFailure = true;
+                    }
+                } else {
+                    reportedPersistenceFailure = false;
                 }
 
                 if (progress >= 1) {
@@ -370,17 +383,22 @@ async function startFlightSimulation(
                     info(`Flight ${flightId} landed. Simulation stopped.`);
                 }
             } catch (simulationError: unknown) {
-                reportFailure(`Flight ${flightId} simulation failed: ${
-                    simulationError instanceof Error ? simulationError.message : "unknown error"
-                }`);
-                clearInterval(timer);
-                flightSimulationTimers.delete(flightId);
+                if (!reportedPersistenceFailure) {
+                    reportFailure(`Flight ${flightId} is moving, but its position could not be saved: ${
+                        simulationError instanceof Error ? simulationError.message : "unknown error"
+                    }`);
+                    reportedPersistenceFailure = true;
+                }
             } finally {
                 updateInProgress = false;
             }
-        }, 2000);
+        };
 
+        timer = setInterval(() => {
+            void updatePosition();
+        }, FLIGHT_SIMULATION_TICK_MS);
         flightSimulationTimers.set(flightId, timer);
+        void updatePosition();
     } catch (simulationError: unknown) {
         reportFailure(`Unable to start simulation for flight ${flightId}: ${
             simulationError instanceof Error ? simulationError.message : "unknown error"
