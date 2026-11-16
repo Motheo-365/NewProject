@@ -1,13 +1,10 @@
+// Use your deployed Render WebSocket endpoint
 const SOCKET_SERVERS = [
-    'ws://localhost:1024',
-    'ws://localhost:21050',
-    'ws://localhost:30759',
-    'ws://localhost:41151',
-    'ws://localhost:1029',
+    'wss://newproject-hymp.onrender.com',
 ] as const;
 
-const CONNECTION_TIMEOUT_MS = 3000;
-const RETRY_DELAY_MS = 1000;
+const CONNECTION_TIMEOUT_MS = 5000; // Slightly increased timeout for cloud servers
+const RETRY_DELAY_MS = 2000;
 
 function connectToServer(url: string): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
@@ -61,7 +58,7 @@ export async function connectToSocketServer(): Promise<WebSocket> {
             }
         }
 
-        console.warn('No allowed WebSocket server is reachable; retrying the allowed list.', failures);
+        console.warn('WebSocket server is unreachable; retrying...', failures);
 
         await new Promise<void>((resolve) => {
             window.setTimeout(resolve, RETRY_DELAY_MS);
