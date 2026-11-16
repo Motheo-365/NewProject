@@ -8,8 +8,8 @@
    - Initialises the CLI when running in an interactive terminal
 */
 
-import { initSocketServer } from "./sockets/socketServer";
-import { handleCommand } from "./cli/cliHandler";
+import { initSocketServer } from "./src/sockets/socketServer";
+import { handleCommand } from "./src/cli/cliHandler";
 import * as readline from "readline";
 
 // ==================== PORTS ===============================

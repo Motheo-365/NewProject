@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const DB_API_URL = "ht";
+export const DB_API_URL = "https://newproject-2wyo.onrender.com/";
 
 // Define a general structure for your API payloads and responses
 export interface ApiPayload {
