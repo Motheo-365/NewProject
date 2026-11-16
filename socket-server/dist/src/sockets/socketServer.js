@@ -256,29 +256,13 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
         }
         const durationMilliseconds = Math.max(durationHours * 1000, FLIGHT_SIMULATION_TICK_MS);
         const startTime = Date.now();
-        let updateInProgress = false;
         let reportedPersistenceFailure = false;
         let timer;
         const updatePosition = async () => {
-            if (updateInProgress)
-                return;
-            updateInProgress = true;
             try {
                 const progress = Math.min((Date.now() - startTime) / durationMilliseconds, 1);
                 const position = interpolateGreatCircle(origin, destination, progress);
                 const status = progress >= 1 ? "Landed" : "In Flight";
-                (0, serverState_1.getFlightSubscribers)(flightId).forEach((clientId) => {
-                    const clientSocket = (0, serverState_1.getSocket)(clientId);
-                    if (clientSocket?.readyState === ws_1.default.OPEN) {
-                        clientSocket.send(JSON.stringify({
-                            type: "FLIGHT_UPDATE",
-                            flightId,
-                            latitude: position.latitude,
-                            longitude: position.longitude,
-                            status
-                        }));
-                    }
-                });
                 const updateResponse = await (0, apiService_1.request)({
                     type: "UpdateFlightPosition",
                     server_key: process.env.SERVER_KEY,
@@ -295,11 +279,34 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                 }
                 else {
                     reportedPersistenceFailure = false;
+                    if (!isRecord(updateResponse.data)
+                        || typeof updateResponse.data.latitude !== "number"
+                        || typeof updateResponse.data.longitude !== "number"
+                        || typeof updateResponse.data.status !== "string") {
+                        throw new Error("Flight API did not return the saved position.");
+                    }
+                    const savedPosition = {
+                        latitude: updateResponse.data.latitude,
+                        longitude: updateResponse.data.longitude,
+                        status: updateResponse.data.status
+                    };
+                    (0, serverState_1.getFlightSubscribers)(flightId).forEach((clientId) => {
+                        const clientSocket = (0, serverState_1.getSocket)(clientId);
+                        if (clientSocket?.readyState === ws_1.default.OPEN) {
+                            clientSocket.send(JSON.stringify({
+                                type: "FLIGHT_UPDATE",
+                                flightId,
+                                ...savedPosition
+                            }));
+                        }
+                    });
                 }
                 if (progress >= 1) {
-                    clearInterval(timer);
+                    if (timer)
+                        clearTimeout(timer);
                     flightSimulationTimers.delete(flightId);
                     (0, logger_1.info)(`Flight ${flightId} landed. Simulation stopped.`);
+                    return;
                 }
             }
             catch (simulationError) {
@@ -308,14 +315,11 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                     reportedPersistenceFailure = true;
                 }
             }
-            finally {
-                updateInProgress = false;
-            }
+            timer = setTimeout(() => {
+                void updatePosition();
+            }, FLIGHT_SIMULATION_TICK_MS);
+            flightSimulationTimers.set(flightId, timer);
         };
-        timer = setInterval(() => {
-            void updatePosition();
-        }, FLIGHT_SIMULATION_TICK_MS);
-        flightSimulationTimers.set(flightId, timer);
         void updatePosition();
     }
     catch (simulationError) {

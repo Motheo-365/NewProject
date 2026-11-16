@@ -310,29 +310,36 @@ export const updateFlightPosition = async (req: AuthenticatedRequest, res: Respo
   }
 
   try {
+    let updateResult;
     if (status) {
       const query = `
         UPDATE flights 
         SET current_latitude = $1, current_longitude = $2, status = $3
         WHERE id = $4
+        RETURNING id, current_latitude, current_longitude, status
       `;
-      const result = await pool.query(query, [latitude, longitude, status, flight_id]);
-      if (result.rowCount === 0) {
-        return sendResponse(res, 'error', 'flight not found', null, 404);
-      }
+      updateResult = await pool.query(query, [latitude, longitude, status, flight_id]);
     } else {
       const queryWithoutStatus = `
         UPDATE flights 
         SET current_latitude = $1, current_longitude = $2
         WHERE id = $3
+        RETURNING id, current_latitude, current_longitude, status
       `;
-      const result = await pool.query(queryWithoutStatus, [latitude, longitude, flight_id]);
-      if (result.rowCount === 0) {
-        return sendResponse(res, 'error', 'flight not found', null, 404);
-      }
+      updateResult = await pool.query(queryWithoutStatus, [latitude, longitude, flight_id]);
     }
 
-    return sendResponse(res, 'success', 'flight position updated');
+    const updatedFlight = updateResult.rows[0];
+    if (!updatedFlight) {
+      return sendResponse(res, 'error', 'flight not found', null, 404);
+    }
+
+    return sendResponse(res, 'success', 'flight position updated', {
+      flight_id: updatedFlight.id,
+      latitude: Number(updatedFlight.current_latitude),
+      longitude: Number(updatedFlight.current_longitude),
+      status: updatedFlight.status,
+    });
   } catch (err: any) {
     return sendResponse(res, 'error', err.message, null, 500);
   }
