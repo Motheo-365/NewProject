@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import Loader from '../components/Loader';
 import type { LoginResponse } from '../interfaces/api';
 import { apiService } from '../services/apiService';
+import { socketService } from '../services/socketService';
 
 import '../styles/login.css';
 
@@ -50,6 +51,7 @@ export default function LoginPage() {
         return;
       }
 
+      socketService.disconnect();
       localStorage.setItem('api_key', user.api_key);
       localStorage.setItem('user_type', user.type);
       localStorage.setItem('username', user.username);

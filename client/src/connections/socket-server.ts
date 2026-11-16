@@ -3,8 +3,9 @@ const SOCKET_SERVERS = [
     'wss://newproject-hymp.onrender.com',
 ] as const;
 
-const CONNECTION_TIMEOUT_MS = 5000; // Slightly increased timeout for cloud servers
-const RETRY_DELAY_MS = 2000;
+const CONNECTION_TIMEOUT_MS = 60_000;
+const INITIAL_RETRY_DELAY_MS = 2_000;
+const MAX_RETRY_DELAY_MS = 30_000;
 
 function connectToServer(url: string): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
@@ -47,6 +48,8 @@ function connectToServer(url: string): Promise<WebSocket> {
 }
 
 export async function connectToSocketServer(): Promise<WebSocket> {
+    let retryDelay = INITIAL_RETRY_DELAY_MS;
+
     while (true) {
         const failures: string[] = [];
 
@@ -58,10 +61,14 @@ export async function connectToSocketServer(): Promise<WebSocket> {
             }
         }
 
-        console.warn('WebSocket server is unreachable; retrying...', failures);
+        console.warn(
+            `WebSocket server is unreachable; retrying in ${Math.round(retryDelay / 1000)} seconds.`,
+            failures,
+        );
 
         await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, RETRY_DELAY_MS);
+            window.setTimeout(resolve, retryDelay);
         });
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
     }
 }
