@@ -249,6 +249,10 @@ async function handleDispatch(data: any, { socket }: MessageContext) {
 
     if (res.status === "success") {
         subscribeToFlight(socket.user.username, data.flightId);
+        socket.send(JSON.stringify({
+            type: "TRACK_SUCCESS",
+            flightId: data.flightId
+        }));
         void startFlightSimulation(data.flightId, socket.user.api_key, socket);
 
         const flightRes: any = await request({
