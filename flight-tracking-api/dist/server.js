@@ -6,20 +6,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const authController_1 = require("./controllers/authController");
-const airportController_1 = require("./controllers/airportController");
-const auth_1 = require("./middleware/auth");
-const response_1 = require("./utils/response");
+const authRoutes_1 = __importDefault(require("./src/routes/authRoutes"));
+const airportRoutes_1 = __importDefault(require("./src/routes/airportRoutes"));
+const flightRoutes_1 = __importDefault(require("./src/routes/flightRoutes"));
+const response_1 = require("./src/utils/response");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3000;
 // Middleware
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-// Routes matching your previous request-type style or standard REST endpoints
-app.post('/api/login', authController_1.login);
-app.get('/api/me', auth_1.authenticate, authController_1.getMe);
-app.get('/api/airports', airportController_1.getAirports);
+// Register API Route Groups
+app.use('/api/auth', authRoutes_1.default);
+app.use('/api/airports', airportRoutes_1.default);
+app.use('/api/flights', flightRoutes_1.default);
 // Global Error Handler Middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);

@@ -1,0 +1,151 @@
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: clamp(24px, 6vw, 72px) 20px;
+  background: #edf4f8;
+  color: #203246;
+  font-family: var(--font-body, "Segoe UI", sans-serif);
+}
+
+.login-card {
+  width: min(100%, 440px);
+  padding: clamp(28px, 6vw, 44px);
+  border: 1px solid #d7e2eb;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(31, 62, 86, 0.12);
+}
+
+.login-eyebrow {
+  margin: 0 0 10px;
+  color: #2874a6;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.login-title {
+  margin: 0;
+  color: #172b3d;
+  font-family: var(--font-heading, "Segoe UI", sans-serif);
+  font-size: clamp(2rem, 7vw, 2.5rem);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.login-description {
+  margin: 10px 0 28px;
+  color: #607387;
+  font-size: 0.95rem;
+}
+
+.login-form {
+  display: grid;
+  gap: 18px;
+}
+
+.login-field {
+  display: grid;
+  gap: 7px;
+}
+
+.login-field label {
+  color: #30465a;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.login-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid #cbd8e3;
+  border-radius: 7px;
+  outline: none;
+  background: #fff;
+  color: #203246;
+  font: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.login-field input::placeholder {
+  color: #8595a5;
+}
+
+.login-field input:focus-visible {
+  border-color: #2874a6;
+  box-shadow: 0 0 0 3px rgba(40, 116, 166, 0.15);
+}
+
+.login-password-control {
+  position: relative;
+}
+
+.login-password-control input {
+  padding-right: 72px;
+}
+
+.login-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #2874a6;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.login-password-toggle:hover {
+  color: #174f77;
+}
+
+.login-password-toggle:focus-visible,
+.login-submit:focus-visible {
+  outline: 2px solid #2874a6;
+  outline-offset: 3px;
+}
+
+.login-error {
+  padding: 10px 12px;
+  border: 1px solid #e6a3a3;
+  border-radius: 7px;
+  background: #fff2f1;
+  color: #a52e32;
+  font-size: 0.9rem;
+}
+
+.login-submit {
+  min-height: 48px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: #176b9b;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.login-submit:hover {
+  transform: translateY(-1px);
+  background: #12577f;
+}
+
+.login-submit:active {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-field input,
+  .login-submit {
+    transition: none;
+  }
+}
