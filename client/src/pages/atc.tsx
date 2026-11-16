@@ -140,7 +140,7 @@ export default function AtcPage() {
     }, 0);
 
     if (apiKey && !socketService.isConnected()) {
-      void socketService.connect(apiKey).catch((connectError: unknown) => {
+      void socketService.connect().catch((connectError: unknown) => {
         console.error('Unable to connect to the flight socket:', connectError);
         setIsSocketConnected(false);
         addNotification('Live flight updates are unavailable.');

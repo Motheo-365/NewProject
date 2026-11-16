@@ -124,29 +124,50 @@ async function handleAuth(data: any, { socket, setUsername }: MessageContext) {
         if (res.status !== "success") {
             socket.send(JSON.stringify({
                 type: "AUTH_FAILED",
-                message: "Invalid API key"
+                message: res.message || "The API rejected this API key."
             }));
             return;
         }
 
         const user = res.data;
+        if (
+            !isRecord(user)
+            || typeof user.id !== "number"
+            || typeof user.username !== "string"
+            || typeof user.type !== "string"
+        ) {
+            socket.send(JSON.stringify({
+                type: "AUTH_FAILED",
+                message: "The API returned an invalid user profile."
+            }));
+            return;
+        }
+
+        const role = user.type.trim().toUpperCase();
+        if (role !== "ATC" && role !== "PASSENGER") {
+            socket.send(JSON.stringify({
+                type: "AUTH_FAILED",
+                message: `Unsupported account type: ${user.type}`
+            }));
+            return;
+        }
 
         setUsername(user.username);
         socket.user = {
             id: user.id,
             username: user.username,
-            role: user.type,
+            role,
             api_key: apiKey
         };
 
-        addUser(user.username, socket);
+        addUser(user.username, socket, role);
 
         socket.send(JSON.stringify({
             type: "AUTH_SUCCESS",
-            role: user.type
+            role
         }));
 
-        info(`User authenticated: ${user.username} (${user.type})`);
+        info(`User authenticated: ${user.username} (${role})`);
     } catch (err: any) {
         error(err.message);
 
@@ -376,7 +397,7 @@ async function handleBoard(data: any, { socket }: MessageContext) {
         return;
     }
 
-    if (socket.user.role !== "Passenger") {
+    if (socket.user.role !== "PASSENGER") {
         socket.send(JSON.stringify({
             type: "ERROR",
             message: "Unauthorized"

@@ -132,8 +132,13 @@ class SocketService {
     }
   }
 
-  async connect(apiKey: string): Promise<void> {
+  async connect(): Promise<void> {
     this.disconnect();
+
+    const storedApiKey = localStorage.getItem('api_key')?.trim();
+    if (!storedApiKey) {
+      throw new Error('No API key is saved for the signed-in user. Log in again.');
+    }
 
     const socket = await connectToSocketServer();
     this.socket = socket;
@@ -170,7 +175,13 @@ class SocketService {
       console.log('WebSocket connection closed');
     });
 
-    this.send({ type: 'AUTH', api_key: apiKey });
+    const currentApiKey = localStorage.getItem('api_key')?.trim();
+    if (!currentApiKey) {
+      this.disconnect();
+      throw new Error('The saved API key was removed before the socket connected. Log in again.');
+    }
+
+    this.send({ type: 'AUTH', api_key: currentApiKey });
   }
 
   send(message: SocketClientMessage): void {
