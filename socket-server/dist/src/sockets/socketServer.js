@@ -10,6 +10,7 @@ const apiService_1 = require("../services/apiService");
 const serverState_1 = require("../state/serverState");
 const flightSimulationTimers = new Map();
 const FLIGHT_SIMULATION_TICK_MS = 250;
+const SIMULATED_MINUTES_PER_FLIGHT_HOUR = 1;
 function isRecord(value) {
     return typeof value === "object" && value !== null;
 }
@@ -234,7 +235,7 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
     };
     const currentTimer = flightSimulationTimers.get(flightId);
     if (currentTimer)
-        clearInterval(currentTimer);
+        clearTimeout(currentTimer);
     try {
         const response = await (0, apiService_1.request)({
             type: "GetFlight",
@@ -254,7 +255,7 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
             || durationHours <= 0) {
             throw new Error("Flight route coordinates or duration are invalid.");
         }
-        const durationMilliseconds = Math.max(durationHours * 1000, FLIGHT_SIMULATION_TICK_MS);
+        const durationMilliseconds = Math.max(durationHours * SIMULATED_MINUTES_PER_FLIGHT_HOUR * 60_000, FLIGHT_SIMULATION_TICK_MS);
         const startTime = Date.now();
         let reportedPersistenceFailure = false;
         let timer;
