@@ -330,31 +330,14 @@ async function startFlightSimulation(
 
         const durationMilliseconds = Math.max(durationHours * 1000, FLIGHT_SIMULATION_TICK_MS);
         const startTime = Date.now();
-        let updateInProgress = false;
         let reportedPersistenceFailure = false;
-        let timer: NodeJS.Timeout;
+        let timer: NodeJS.Timeout | undefined;
 
         const updatePosition = async () => {
-            if (updateInProgress) return;
-            updateInProgress = true;
-
             try {
                 const progress = Math.min((Date.now() - startTime) / durationMilliseconds, 1);
                 const position = interpolateGreatCircle(origin, destination, progress);
                 const status = progress >= 1 ? "Landed" : "In Flight";
-
-                getFlightSubscribers(flightId).forEach((clientId: string) => {
-                    const clientSocket = getSocket(clientId) as ExtendedWebSocket | undefined;
-                    if (clientSocket?.readyState === WebSocket.OPEN) {
-                        clientSocket.send(JSON.stringify({
-                            type: "FLIGHT_UPDATE",
-                            flightId,
-                            latitude: position.latitude,
-                            longitude: position.longitude,
-                            status
-                        }));
-                    }
-                });
 
                 const updateResponse = await request({
                     type: "UpdateFlightPosition",
@@ -375,12 +358,38 @@ async function startFlightSimulation(
                     }
                 } else {
                     reportedPersistenceFailure = false;
+
+                    if (
+                        !isRecord(updateResponse.data)
+                        || typeof updateResponse.data.latitude !== "number"
+                        || typeof updateResponse.data.longitude !== "number"
+                        || typeof updateResponse.data.status !== "string"
+                    ) {
+                        throw new Error("Flight API did not return the saved position.");
+                    }
+
+                    const savedPosition = {
+                        latitude: updateResponse.data.latitude,
+                        longitude: updateResponse.data.longitude,
+                        status: updateResponse.data.status
+                    };
+                    getFlightSubscribers(flightId).forEach((clientId: string) => {
+                        const clientSocket = getSocket(clientId) as ExtendedWebSocket | undefined;
+                        if (clientSocket?.readyState === WebSocket.OPEN) {
+                            clientSocket.send(JSON.stringify({
+                                type: "FLIGHT_UPDATE",
+                                flightId,
+                                ...savedPosition
+                            }));
+                        }
+                    });
                 }
 
                 if (progress >= 1) {
-                    clearInterval(timer);
+                    if (timer) clearTimeout(timer);
                     flightSimulationTimers.delete(flightId);
                     info(`Flight ${flightId} landed. Simulation stopped.`);
+                    return;
                 }
             } catch (simulationError: unknown) {
                 if (!reportedPersistenceFailure) {
@@ -389,15 +398,14 @@ async function startFlightSimulation(
                     }`);
                     reportedPersistenceFailure = true;
                 }
-            } finally {
-                updateInProgress = false;
             }
+
+            timer = setTimeout(() => {
+                void updatePosition();
+            }, FLIGHT_SIMULATION_TICK_MS);
+            flightSimulationTimers.set(flightId, timer);
         };
 
-        timer = setInterval(() => {
-            void updatePosition();
-        }, FLIGHT_SIMULATION_TICK_MS);
-        flightSimulationTimers.set(flightId, timer);
         void updatePosition();
     } catch (simulationError: unknown) {
         reportFailure(`Unable to start simulation for flight ${flightId}: ${
