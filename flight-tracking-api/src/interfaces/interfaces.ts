@@ -44,7 +44,8 @@ enum FlightStatus {
     BOOKED = 'BOOKED',
     CHECKED_IN = 'CHECKED IN',
     Cancelled = 'CANCELLED',
-    BOARDED = 'BOARDED'
+    BOARDED = 'BOARDED',
+    NO_SHOW = 'NO_SHOW'
 }
 
 enum UserType {

@@ -5,6 +5,7 @@ import type {
 } from '../interfaces/socket';
 import type { ApiResponse } from '../interfaces/api';
 import { connectToSocketServer } from '../connections/socket-server';
+import { getApiKey } from './apiKeyCookie';
 
 type EventListener<K extends keyof SocketEventMap> = (message: SocketEventMap[K]) => void;
 
@@ -91,17 +92,33 @@ function parseServerMessage(value: unknown): SocketServerMessage | null {
         ? { type: value.type, message: value.message }
         : null;
     case 'TRACK_SUCCESS':
-    case 'BOARDING_CALL':
       return typeof value.flightId === 'number'
         ? { type: value.type, flightId: value.flightId }
+        : null;
+    case 'BOARDING_CALL':
+      return typeof value.flightId === 'number'
+        ? {
+            type: value.type,
+            flightId: value.flightId,
+            ...(typeof value.dispatchedAt === 'string'
+              ? { dispatchedAt: value.dispatchedAt }
+              : {}),
+          }
+        : null;
+    case 'FLIGHT_LANDED':
+      return typeof value.flightId === 'number' && typeof value.flightNumber === 'string'
+        ? { type: value.type, flightId: value.flightId, flightNumber: value.flightNumber }
         : null;
     case 'FLIGHT_UPDATE':
     case 'flight_update':
       return readFlightUpdate(value);
     case 'DISPATCH_RESULT':
-    case 'BOARD_RESULT':
       return isApiResponse(value.data)
         ? { type: value.type, data: value.data }
+        : null;
+    case 'BOARD_RESULT':
+      return typeof value.flightId === 'number' && isApiResponse(value.data)
+        ? { type: value.type, flightId: value.flightId, data: value.data }
         : null;
     case 'BOARDING_CONFIRMED':
       return typeof value.flightId === 'number' && typeof value.passenger === 'string'
@@ -162,6 +179,9 @@ class SocketService {
       case 'BOARDING_CALL':
         this.emit('BOARDING_CALL', message);
         break;
+      case 'FLIGHT_LANDED':
+        this.emit('FLIGHT_LANDED', message);
+        break;
       case 'BOARDING_CONFIRMED':
         this.emit('BOARDING_CONFIRMED', message);
         break;
@@ -180,7 +200,7 @@ class SocketService {
   async connect(): Promise<void> {
     this.disconnect();
 
-    const storedApiKey = localStorage.getItem('api_key')?.trim();
+    const storedApiKey = getApiKey();
     if (!storedApiKey) {
       throw new Error('No API key is saved for the signed-in user. Log in again.');
     }
@@ -223,7 +243,7 @@ class SocketService {
       console.log('WebSocket connection closed');
     });
 
-    const currentApiKey = localStorage.getItem('api_key')?.trim();
+    const currentApiKey = getApiKey();
     if (!currentApiKey) {
       this.disconnect();
       throw new Error('The saved API key was removed before the socket connected. Log in again.');

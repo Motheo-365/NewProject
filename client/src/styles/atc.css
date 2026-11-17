@@ -42,6 +42,45 @@
   font-size: 0.95rem;
 }
 
+.atc-header-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.logout-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    border: 1px solid rgba(255, 100, 100, 0.4);
+    border-radius: 8px;
+    background: transparent;
+    color: #ff7777;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.logout-btn:hover {
+    background: rgba(255, 100, 100, 0.12);
+    border-color: #ff7777;
+}
+
+.logout-btn:focus-visible {
+    outline: 2px solid #ff7777;
+    outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+    .atc-header-main {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
 .atc-page .stats {
   display: grid;
   width: min(100%, 660px);
