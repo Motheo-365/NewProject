@@ -118,12 +118,39 @@
   background: #176b9b;
 }
 
+.legend-airport {
+  background: #176b9b;
+}
+
 .legend-destination {
   background: #db8b35;
 }
 
 .legend-current {
   background: #2a9d72;
+}
+
+.airport-marker {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+}
+
+.airport-marker span {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #176b9b;
+  box-shadow: 0 1px 5px rgba(20, 45, 62, 0.65);
+}
+
+.flight-map-progress {
+  margin-left: auto;
+  color: #173c58;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .aircraft-position-marker {

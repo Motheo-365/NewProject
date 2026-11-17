@@ -34,7 +34,7 @@ interface Coordinates {
 const flightSimulationTimers = new Map<string | number, NodeJS.Timeout>();
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
-const SIMULATED_MINUTES_PER_FLIGHT_HOUR = 1;
+const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -209,7 +209,7 @@ async function handleTrack(data: any, { socket }: MessageContext) {
     if (res.status !== "success") {
         socket.send(JSON.stringify({
             type: "ERROR",
-            message: "Not allowed to track this flight"
+            message: res.message || "Unable to track this flight."
         }));
         return;
     }
@@ -347,8 +347,8 @@ async function startFlightSimulation(
         }
 
         const durationMilliseconds = Math.max(
-            durationHours * SIMULATED_MINUTES_PER_FLIGHT_HOUR * 60_000,
-            FLIGHT_SIMULATION_TICK_MS
+            durationHours * SIMULATED_SECONDS_PER_FLIGHT_HOUR * 1_000,
+            1
         );
         let flightStartedAt: number | null = null;
         let reportedPersistenceFailure = false;
@@ -407,8 +407,9 @@ async function startFlightSimulation(
                         const clientSocket = getSocket(clientId) as ExtendedWebSocket | undefined;
                         if (clientSocket?.readyState === WebSocket.OPEN) {
                             clientSocket.send(JSON.stringify({
-                                type: "FLIGHT_UPDATE",
+                                type: "POSITION",
                                 flightId,
+                                progress,
                                 ...savedPosition
                             }));
                         }
@@ -442,7 +443,7 @@ async function startFlightSimulation(
 
             timer = setTimeout(() => {
                 void updatePosition();
-            }, FLIGHT_SIMULATION_TICK_MS);
+            }, Math.min(FLIGHT_SIMULATION_TICK_MS, durationMilliseconds));
             flightSimulationTimers.set(flightId, timer);
         };
 
@@ -526,7 +527,15 @@ export function initSocketServer(port: number, host: string = "0.0.0.0") {
                 const data = JSON.parse(message.toString());
                 if (!data.type) return;
 
-                handleMessage(data.type, data, context);
+                void Promise.resolve(handleMessage(data.type, data, context)).catch((messageError: unknown) => {
+                    const errorMessage = messageError instanceof Error
+                        ? messageError.message
+                        : "Unable to process the socket message.";
+                    error(errorMessage);
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ type: "ERROR", message: errorMessage }));
+                    }
+                });
             } catch {
                 error("Invalid JSON received");
             }

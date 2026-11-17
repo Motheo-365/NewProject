@@ -42,6 +42,7 @@ export interface FlightUpdateMessage {
     latitude: number;
     longitude: number;
     status: string;
+    progress: number;
 }
 
 export interface TrackSuccessMessage {

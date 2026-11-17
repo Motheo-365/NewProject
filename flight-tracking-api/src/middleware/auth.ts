@@ -28,7 +28,11 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
       return sendResponse(res, 'error', 'invalid api key', null, 401);
     }
 
-    req.user = result.rows[0];
+    const user = result.rows[0];
+    req.user = {
+      ...user,
+      type: typeof user.type === 'string' ? user.type.trim().toUpperCase() : user.type,
+    };
     next();
   } catch (err: any) {
     return sendResponse(res, 'error', 'Authentication error: ' + err.message, null, 500);

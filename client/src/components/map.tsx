@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 
-import type { Flight } from '../interfaces/api';
+import type { Airport, Flight } from '../interfaces/api';
 import Loader from './Loader';
 import { apiService } from '../services/apiService';
 import { getAirportLocation } from '../services/locationServices';
@@ -35,9 +35,14 @@ function getBearingDegrees(
 function Map({ apiKey, activeFlight }: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const flightLayersRef = useRef<L.LayerGroup | null>(null);
-  const currentPositionMarkerRef = useRef<L.Marker | null>(null);
+  const airportLayersRef = useRef<L.LayerGroup | null>(null);
+  const routeLayersRef = useRef<L.LayerGroup | null>(null);
+  const aircraftLayersRef = useRef<L.LayerGroup | null>(null);
+  const aircraftMarkerRef = useRef<L.Marker | null>(null);
   const positionAnimationFrameRef = useRef<number | null>(null);
+  const markerFlightIdRef = useRef<number | null>(null);
+  const markerProgressRef = useRef(0);
+  const [airports, setAirports] = useState<Airport[]>([]);
   const [flights, setFlights] = useState<Flight[]>([]);
   const [localSelectedFlightId, setLocalSelectedFlightId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
@@ -47,43 +52,37 @@ function Map({ apiKey, activeFlight }: MapProps) {
   const selectedFlightId = isControlled
     ? activeFlight ? String(activeFlight.id) : ''
     : localSelectedFlightId;
-  const displayFlights = useMemo(
-    () => {
-      if (!activeFlight) return flights;
+  const displayFlights = useMemo(() => {
+    if (!activeFlight) return flights;
 
-      const hasActiveFlight = flights.some((flight) => flight.id === activeFlight.id);
-      const updatedFlights = flights.map((flight) => (
-        activeFlight.id === flight.id ? { ...flight, ...activeFlight } : flight
-      ));
+    const hasActiveFlight = flights.some((flight) => flight.id === activeFlight.id);
+    const updatedFlights = flights.map((flight) => (
+      activeFlight.id === flight.id ? { ...flight, ...activeFlight } : flight
+    ));
 
-      return hasActiveFlight ? updatedFlights : [...updatedFlights, activeFlight];
-    },
-    [activeFlight, flights],
-  );
+    return hasActiveFlight ? updatedFlights : [...updatedFlights, activeFlight];
+  }, [activeFlight, flights]);
   const selectedFlight = useMemo(
     () => displayFlights.find((flight) => String(flight.id) === selectedFlightId) ?? null,
     [displayFlights, selectedFlightId],
   );
+  const selectedFlightIdValue = selectedFlight?.id;
   const selectedFlightNumber = selectedFlight?.flight_number;
   const selectedFlightOrigin = selectedFlight?.origin;
   const selectedFlightDestination = selectedFlight?.destination;
   const selectedFlightDuration = selectedFlight?.flight_duration_hours;
-  const currentLatitude = selectedFlight?.current_position.latitude;
-  const currentLongitude = selectedFlight?.current_position.longitude;
   const selectedRoute = useMemo(() => {
     if (
-      !selectedFlightId
+      selectedFlightIdValue === undefined
       || !selectedFlightNumber
       || !selectedFlightOrigin
       || !selectedFlightDestination
       || selectedFlightDuration === undefined
-    ) {
-      return null;
-    }
+    ) return null;
 
     try {
       return {
-        flightId: selectedFlightId,
+        flightId: selectedFlightIdValue,
         flightNumber: selectedFlightNumber,
         origin: getAirportLocation(selectedFlightOrigin),
         destination: getAirportLocation(selectedFlightDestination),
@@ -92,37 +91,51 @@ function Map({ apiKey, activeFlight }: MapProps) {
           selectedFlightDestination,
           selectedFlightDuration,
         ).geometry,
+        durationHours: selectedFlightDuration,
         warning: '',
       };
     } catch (routeError: unknown) {
       return {
-        flightId: selectedFlightId,
+        flightId: selectedFlightIdValue,
         flightNumber: selectedFlightNumber,
         origin: null,
         destination: null,
         geometry: null,
+        durationHours: selectedFlightDuration,
         warning: routeError instanceof Error
           ? `${selectedFlightNumber}: ${routeError.message}`
           : `${selectedFlightNumber}: route data is invalid.`,
       };
     }
   }, [
-    selectedFlightId,
+    selectedFlightIdValue,
     selectedFlightNumber,
     selectedFlightOrigin,
     selectedFlightDestination,
     selectedFlightDuration,
   ]);
-  const destinationLatitude = selectedRoute?.destination?.latitude;
-  const destinationLongitude = selectedRoute?.destination?.longitude;
+  const trackedFlight = selectedRoute
+    ? displayFlights.find((flight) => flight.id === selectedRoute.flightId)
+    : null;
+  const trackedPosition = useMemo(() => {
+    if (!trackedFlight) return null;
+
+    return {
+      flightId: trackedFlight.id,
+      latitude: trackedFlight.current_position.latitude,
+      longitude: trackedFlight.current_position.longitude,
+      progress: trackedFlight.progress,
+    };
+  }, [trackedFlight]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
-      center: [0, 0],
+      center: [20, 0],
       zoom: 2,
-      scrollWheelZoom: false,
+      minZoom: 2,
+      scrollWheelZoom: true,
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -130,33 +143,47 @@ function Map({ apiKey, activeFlight }: MapProps) {
       maxZoom: 19,
     }).addTo(map);
 
-    flightLayersRef.current = L.layerGroup().addTo(map);
+    airportLayersRef.current = L.layerGroup().addTo(map);
+    routeLayersRef.current = L.layerGroup().addTo(map);
+    aircraftLayersRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
     return () => {
+      if (positionAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(positionAnimationFrameRef.current);
+      }
       map.remove();
       mapRef.current = null;
-      flightLayersRef.current = null;
+      airportLayersRef.current = null;
+      routeLayersRef.current = null;
+      aircraftLayersRef.current = null;
+      aircraftMarkerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
     let active = true;
 
-    async function loadFlights() {
+    async function loadMapData() {
       setIsLoading(true);
       setError('');
 
       try {
-        const response = await apiService.getFlights(apiKey);
-        if (response.status !== 'success' || !response.data) {
-          throw new Error(response.message || 'The API did not return flight route data.');
+        const [flightResponse, airportResponse] = await Promise.all([
+          apiService.getFlights(apiKey),
+          apiService.getAirports(),
+        ]);
+        if (flightResponse.status !== 'success' || !flightResponse.data) {
+          throw new Error(flightResponse.message || 'The API did not return flight route data.');
+        }
+        if (airportResponse.status !== 'success' || !airportResponse.data) {
+          throw new Error(airportResponse.message || 'The API did not return airport data.');
         }
 
         if (!active) return;
-
-        const availableFlights = response.data.flights;
+        const availableFlights = flightResponse.data.flights;
         setFlights(availableFlights);
+        setAirports(airportResponse.data);
         setLocalSelectedFlightId((current) => (
           availableFlights.some((flight) => String(flight.id) === current)
             ? current
@@ -164,18 +191,14 @@ function Map({ apiKey, activeFlight }: MapProps) {
         ));
       } catch (loadError: unknown) {
         if (active) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'Unable to load flight routes.',
-          );
+          setError(loadError instanceof Error ? loadError.message : 'Unable to load flight map data.');
         }
       } finally {
         if (active) setIsLoading(false);
       }
     }
 
-    void loadFlights();
+    void loadMapData();
 
     return () => {
       active = false;
@@ -183,8 +206,32 @@ function Map({ apiKey, activeFlight }: MapProps) {
   }, [apiKey]);
 
   useEffect(() => {
+    const layers = airportLayersRef.current;
+    if (!layers) return;
+
+    layers.clearLayers();
+    const airportIcon = L.divIcon({
+      className: 'airport-marker',
+      html: '<span aria-hidden="true"></span>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+
+    airports.forEach((airport) => {
+      const location = getAirportLocation(airport);
+      L.marker([location.latitude, location.longitude], {
+        icon: airportIcon,
+        title: `${location.name} (${location.code})`,
+        keyboard: true,
+      })
+        .bindTooltip(location.code, { direction: 'top', offset: [0, -6] })
+        .addTo(layers);
+    });
+  }, [airports]);
+
+  useEffect(() => {
     const map = mapRef.current;
-    const layers = flightLayersRef.current;
+    const layers = routeLayersRef.current;
     if (!map || !layers) return;
 
     if (positionAnimationFrameRef.current !== null) {
@@ -192,7 +239,10 @@ function Map({ apiKey, activeFlight }: MapProps) {
       positionAnimationFrameRef.current = null;
     }
     layers.clearLayers();
-    currentPositionMarkerRef.current = null;
+    aircraftLayersRef.current?.clearLayers();
+    aircraftMarkerRef.current = null;
+    markerFlightIdRef.current = selectedRoute?.flightId ?? null;
+    markerProgressRef.current = 0;
     if (!selectedRoute?.geometry || !selectedRoute.origin || !selectedRoute.destination) return;
 
     const routeLine = L.polyline(selectedRoute.geometry, {
@@ -203,47 +253,42 @@ function Map({ apiKey, activeFlight }: MapProps) {
       lineJoin: 'round',
     }).addTo(layers);
 
-    L.circleMarker([selectedRoute.origin.latitude, selectedRoute.origin.longitude], {
-      radius: 7,
-      color: '#fff',
-      weight: 2,
-      fillColor: '#176b9b',
-      fillOpacity: 1,
-    })
-      .bindPopup(`<strong>Origin: ${selectedRoute.origin.code}</strong><br>${selectedRoute.origin.name}`)
-      .addTo(layers);
-
-    L.circleMarker([selectedRoute.destination.latitude, selectedRoute.destination.longitude], {
-      radius: 7,
-      color: '#fff',
-      weight: 2,
-      fillColor: '#db8b35',
-      fillOpacity: 1,
-    })
-      .bindPopup(`<strong>Destination: ${selectedRoute.destination.code}</strong><br>${selectedRoute.destination.name}`)
-      .addTo(layers);
-
     map.fitBounds(routeLine.getBounds(), { padding: [36, 36], maxZoom: 6 });
   }, [selectedRoute]);
 
   useEffect(() => {
-    const layers = flightLayersRef.current;
-    if (!layers || !selectedRoute?.geometry) return;
+    const layers = aircraftLayersRef.current;
+    if (!layers || !selectedRoute || !trackedPosition) return;
+    if (typeof trackedPosition.progress !== 'number' || !Number.isFinite(trackedPosition.progress)) return;
 
+    const latitude = trackedPosition.latitude;
+    const longitude = trackedPosition.longitude;
     if (
-      typeof currentLatitude !== 'number'
-      || !Number.isFinite(currentLatitude)
-      || currentLatitude < -90
-      || currentLatitude > 90
-      || typeof currentLongitude !== 'number'
-      || !Number.isFinite(currentLongitude)
-      || currentLongitude < -180
-      || currentLongitude > 180
+      typeof latitude !== 'number'
+      || !Number.isFinite(latitude)
+      || latitude < -90
+      || latitude > 90
+      || typeof longitude !== 'number'
+      || !Number.isFinite(longitude)
+      || longitude < -180
+      || longitude > 180
     ) {
       return;
     }
 
-    if (!currentPositionMarkerRef.current) {
+    const progress = Math.min(Math.max(trackedPosition.progress, 0), 1);
+
+    if (markerFlightIdRef.current !== trackedPosition.flightId) {
+      if (positionAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(positionAnimationFrameRef.current);
+      }
+      layers.clearLayers();
+      aircraftMarkerRef.current = null;
+      markerFlightIdRef.current = trackedPosition.flightId;
+      markerProgressRef.current = 0;
+    }
+
+    if (!aircraftMarkerRef.current) {
       const aircraftIcon = L.divIcon({
         className: 'aircraft-position-marker',
         html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16Z"/></svg>',
@@ -251,82 +296,70 @@ function Map({ apiKey, activeFlight }: MapProps) {
         iconAnchor: [16, 16],
       });
 
-      currentPositionMarkerRef.current = L.marker(
-        [currentLatitude, currentLongitude],
-        { icon: aircraftIcon, keyboard: true, title: `${selectedRoute.flightNumber} current position` },
-      )
-        .bindPopup(`<strong>${selectedRoute.flightNumber}</strong><br>Current aircraft position`)
+      aircraftMarkerRef.current = L.marker([latitude, longitude], {
+        icon: aircraftIcon,
+        keyboard: true,
+        title: `${selectedRoute.flightNumber} aircraft position`,
+      })
+        .bindTooltip(selectedRoute.flightNumber, { direction: 'top', offset: [0, -12] })
         .addTo(layers);
-    } else {
-      const marker = currentPositionMarkerRef.current;
-      const start = marker.getLatLng();
-      const startedAt = performance.now();
-      const animationDuration = 400;
-
-      const animatePosition = (now: number) => {
-        const progress = Math.min((now - startedAt) / animationDuration, 1);
-        const latitude = start.lat + (currentLatitude - start.lat) * progress;
-        const longitude = start.lng + (currentLongitude - start.lng) * progress;
-
-        marker.setLatLng([latitude, longitude]);
-
-        if (
-          typeof destinationLatitude === 'number'
-          && typeof destinationLongitude === 'number'
-        ) {
-          const bearing = getBearingDegrees(
-            latitude,
-            longitude,
-            destinationLatitude,
-            destinationLongitude,
-          );
-          const planeIcon = marker.getElement()?.querySelector('svg');
-          if (planeIcon) planeIcon.style.transform = `rotate(${bearing}deg)`;
-        }
-
-        if (progress < 1) {
-          positionAnimationFrameRef.current = requestAnimationFrame(animatePosition);
-        } else {
-          positionAnimationFrameRef.current = null;
-        }
-      };
-
-      positionAnimationFrameRef.current = requestAnimationFrame(animatePosition);
-
-      return () => {
-        if (positionAnimationFrameRef.current !== null) {
-          cancelAnimationFrame(positionAnimationFrameRef.current);
-          positionAnimationFrameRef.current = null;
-        }
-      };
-    }
-
-    if (
-      typeof destinationLatitude !== 'number'
-      || typeof destinationLongitude !== 'number'
-    ) {
+      markerProgressRef.current = progress;
       return;
     }
 
-    const bearing = getBearingDegrees(
-      currentLatitude,
-      currentLongitude,
-      destinationLatitude,
-      destinationLongitude,
-    );
-    const planeIcon = currentPositionMarkerRef.current.getElement()?.querySelector('svg');
-    if (planeIcon) {
-      planeIcon.style.transform = `rotate(${bearing}deg)`;
+    if (positionAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(positionAnimationFrameRef.current);
+      positionAnimationFrameRef.current = null;
     }
+
+    const marker = aircraftMarkerRef.current;
+    const start = marker.getLatLng();
+    const startingProgress = markerProgressRef.current;
+    const targetProgress = Math.max(startingProgress, progress);
+    const duration = Math.max(
+      (targetProgress - startingProgress) * selectedRoute.durationHours * 1000,
+      80,
+    );
+    const startedAt = performance.now();
+
+    const animatePosition = (now: number) => {
+      const animationProgress = Math.min((now - startedAt) / duration, 1);
+      const nextLatitude = start.lat + (latitude - start.lat) * animationProgress;
+      const nextLongitude = start.lng + (longitude - start.lng) * animationProgress;
+      marker.setLatLng([nextLatitude, nextLongitude]);
+      markerProgressRef.current = startingProgress
+        + (targetProgress - startingProgress) * animationProgress;
+
+      if (
+        selectedRoute.destination
+        && marker.getElement()
+      ) {
+        const bearing = getBearingDegrees(
+          nextLatitude,
+          nextLongitude,
+          selectedRoute.destination.latitude,
+          selectedRoute.destination.longitude,
+        );
+        const planeIcon = marker.getElement()?.querySelector('svg');
+        if (planeIcon) planeIcon.style.transform = `rotate(${bearing}deg)`;
+      }
+
+      if (animationProgress < 1) {
+        positionAnimationFrameRef.current = requestAnimationFrame(animatePosition);
+      } else {
+        positionAnimationFrameRef.current = null;
+      }
+    };
+
+    positionAnimationFrameRef.current = requestAnimationFrame(animatePosition);
   }, [
-    currentLatitude,
-    currentLongitude,
-    destinationLatitude,
-    destinationLongitude,
-    selectedRoute?.flightId,
-    selectedRoute?.flightNumber,
-    selectedRoute?.geometry,
+    trackedPosition,
+    selectedRoute,
   ]);
+
+  const progressPercent = typeof selectedFlight?.progress === 'number'
+    ? Math.round(Math.min(Math.max(selectedFlight.progress, 0), 1) * 100)
+    : null;
 
   return (
     <section className="flight-map-section" aria-label="Flight routes">
@@ -336,12 +369,12 @@ function Map({ apiKey, activeFlight }: MapProps) {
           <p>
             {activeFlight
               ? 'Showing the route selected in your flight list.'
-              : 'Routes and airport locations from your flight data.'}
+              : 'Airport locations and routes from live flight data.'}
           </p>
         </div>
       </div>
 
-      {!isLoading && !error && flights.length > 0 && selectedFlight && (
+      {selectedFlight && (
         <p className="flight-map-summary">
           <strong>{selectedFlight.flight_number}</strong>
           {' · '}
@@ -349,7 +382,8 @@ function Map({ apiKey, activeFlight }: MapProps) {
           {' → '}
           {selectedFlight.destination.name} ({selectedFlight.destination.code})
           {' · '}
-          {selectedFlight.flight_duration_hours.toFixed(1)} hours
+          {selectedFlight.status}
+          {progressPercent !== null && <> · {progressPercent}% complete</>}
         </p>
       )}
       {!isLoading && !error && selectedRoute?.warning && (
@@ -359,19 +393,17 @@ function Map({ apiKey, activeFlight }: MapProps) {
       )}
       <div className="flight-map-stage">
         <div className="flight-map-canvas" ref={mapContainerRef} />
-        {isLoading && <div className="flight-map-status"><Loader message="Loading flight routes…" /></div>}
+        {isLoading && <div className="flight-map-status"><Loader message="Loading airports and flights…" /></div>}
         {error && <p className="flight-map-status flight-map-error" role="alert">{error}</p>}
-        {!isLoading && !error && flights.length === 0 && (
-          <p className="flight-map-status flight-map-empty">
-            No flights with route data are available for this account.
-          </p>
+        {!isLoading && !error && airports.length === 0 && (
+          <p className="flight-map-status flight-map-empty">No airport locations are available.</p>
         )}
       </div>
-      {!isLoading && !error && flights.length > 0 && (
+      {!isLoading && !error && (
         <div className="flight-map-legend" aria-label="Map legend">
-          <span><i className="legend-origin" /> Origin</span>
-          <span><i className="legend-destination" /> Destination</span>
-          <span><i className="legend-current" /> Current position</span>
+          <span><i className="legend-airport" /> Airports</span>
+          <span><i className="legend-current" /> Aircraft</span>
+          {progressPercent !== null && <span className="flight-map-progress">{progressPercent}% complete</span>}
         </div>
       )}
     </section>

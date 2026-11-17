@@ -40,13 +40,12 @@ export function saveCurrentUser(user: LoginResponse): void {
     throw new Error('The login response does not contain a supported user account.');
   }
 
-  setApiKey(user.api_key);
+  const userType = rolePath === '/atc' ? 'ATC' : 'Passenger';
+  setApiKey(user.api_key, user.username, userType);
   localStorage.setItem(
     SESSION_STORAGE_KEY,
-    JSON.stringify({ username: user.username, type: rolePath === '/atc' ? 'ATC' : 'Passenger' }),
+    JSON.stringify({ username: user.username, type: userType }),
   );
-  localStorage.setItem('username', user.username);
-  localStorage.setItem('user_type', rolePath === '/atc' ? 'ATC' : 'Passenger');
 }
 
 export function clearCurrentUser(): void {

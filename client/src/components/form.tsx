@@ -54,6 +54,16 @@ function Form() {
         throw new Error(`Unsupported account type: ${user.type}`);
       }
 
+      const profileResponse = await apiService.me(user.api_key);
+      if (
+        profileResponse.status !== 'success'
+        || !profileResponse.data
+        || profileResponse.data.username !== user.username
+        || profileResponse.data.type.trim().toUpperCase() !== user.type.trim().toUpperCase()
+      ) {
+        throw new Error('The API key returned by login could not be verified for this user.');
+      }
+
       saveCurrentUser(user);
       navigate(destination, { replace: true });
     } catch (submitError: unknown) {
