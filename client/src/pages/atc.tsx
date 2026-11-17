@@ -377,18 +377,19 @@ export default function AtcPage() {
   return (
     <main className="atc-page">
       <header className="atc-header">
-        <div>
-          <h1>Air Traffic Control</h1>
-          <p>Flight Operations Dashboard</p>
+        <div className="atc-header-main">
+          <div>
+            <h1>Air Traffic Control</h1>
+            <p>Flight Operations Dashboard</p>
+          </div>
+          <button
+            type="button"
+            className="atc-logout-btn"
+            onClick={() => setIsLogoutConfirmationOpen(true)}
+          >
+            Log out
+          </button>
         </div>
-
-        <button
-          type="button"
-          className="logout-btn"
-          onClick={() => setIsLogoutConfirmationOpen(true)}
-        >
-          Logout
-        </button>
 
         <div className="stats">
           <div className="stat-card"><h2>{flights.length}</h2><p>Total Flights</p></div>
