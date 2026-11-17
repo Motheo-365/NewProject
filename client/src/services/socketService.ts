@@ -1,4 +1,5 @@
 import type {
+  ConnectedUser,
   SocketClientMessage,
   SocketEventMap,
   SocketServerMessage,
@@ -90,6 +91,48 @@ function parseServerMessage(value: unknown): SocketServerMessage | null {
       return typeof value.role === 'string'
         ? { type: value.type, role: value.role }
         : null;
+    case 'CONNECTED_USERS': {
+      if (
+        typeof value.count !== 'number'
+        || !Number.isInteger(value.count)
+        || typeof value.connections !== 'number'
+        || !Number.isInteger(value.connections)
+        || !Array.isArray(value.users)
+      ) {
+        return null;
+      }
+
+      const users: ConnectedUser[] = [];
+      for (const user of value.users) {
+        if (
+          !isRecord(user)
+          || typeof user.username !== 'string'
+          || (user.role !== 'ATC' && user.role !== 'PASSENGER' && user.role !== null)
+          || typeof user.connections !== 'number'
+          || !Number.isInteger(user.connections)
+          || user.connections <= 0
+        ) {
+          return null;
+        }
+
+        users.push({
+          username: user.username,
+          role: user.role,
+          connections: user.connections,
+        });
+      }
+
+      if (users.length !== value.count || users.reduce((total, user) => total + user.connections, 0) !== value.connections) {
+        return null;
+      }
+
+      return {
+        type: value.type,
+        count: value.count,
+        connections: value.connections,
+        users,
+      };
+    }
     case 'AUTH_FAILED':
     case 'ERROR':
     case 'KILLED':
@@ -168,6 +211,9 @@ class SocketService {
     switch (message.type) {
       case 'AUTH_SUCCESS':
         this.emit('AUTH_SUCCESS', message);
+        break;
+      case 'CONNECTED_USERS':
+        this.emit('CONNECTED_USERS', message);
         break;
       case 'AUTH_FAILED':
         console.error('WebSocket auth failed:', message.message);

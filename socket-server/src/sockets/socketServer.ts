@@ -5,9 +5,10 @@ import { request } from "../services/apiService";
 import {
     addUser,
     removeUser,
-    getSocket,
+    getSockets,
     subscribeToFlight,
-    getFlightSubscribers
+    getFlightSubscribers,
+    getConnectedUsers
 } from "../state/serverState";
 
 // Extend WebSocket interface to support attached custom properties like `.user`
@@ -35,6 +36,23 @@ const flightSimulationTimers = new Map<string | number, NodeJS.Timeout>();
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
 const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
+
+function broadcastConnectedUsers(): void {
+    const users = getConnectedUsers();
+    const message = JSON.stringify({
+        type: "CONNECTED_USERS",
+        count: users.length,
+        connections: users.reduce((total, user) => total + user.connections, 0),
+        users
+    });
+
+    users
+        .filter((user) => user.role === "ATC")
+        .flatMap((user) => getSockets(user.username))
+        .forEach((socket) => {
+            if (socket.readyState === WebSocket.OPEN) socket.send(message);
+        });
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -171,6 +189,7 @@ async function handleAuth(data: any, { socket, setUsername }: MessageContext) {
         }));
 
         info(`User authenticated: ${user.username} (${role})`);
+        broadcastConnectedUsers();
     } catch (err: any) {
         error(err.message);
 
@@ -271,14 +290,15 @@ async function handleDispatch(data: any, { socket }: MessageContext) {
 
         passengers.forEach((passenger: unknown) => {
             if (!isRecord(passenger) || typeof passenger.username !== "string") return;
-            const passengerSocket = getSocket(passenger.username) as ExtendedWebSocket | undefined;
-            if (passengerSocket?.readyState === WebSocket.OPEN) {
-                passengerSocket.send(JSON.stringify({
-                    type: "BOARDING_CALL",
-                    flightId: data.flightId,
-                    ...(dispatchedAt ? { dispatchedAt } : {})
-                }));
-            }
+            getSockets(passenger.username).forEach((passengerSocket) => {
+                if (passengerSocket.readyState === WebSocket.OPEN) {
+                    passengerSocket.send(JSON.stringify({
+                        type: "BOARDING_CALL",
+                        flightId: data.flightId,
+                        ...(dispatchedAt ? { dispatchedAt } : {})
+                    }));
+                }
+            });
         });
 
         if (socket.readyState === WebSocket.OPEN) {
@@ -404,27 +424,29 @@ async function startFlightSimulation(
                     }
 
                     getFlightSubscribers(flightId).forEach((clientId: string) => {
-                        const clientSocket = getSocket(clientId) as ExtendedWebSocket | undefined;
-                        if (clientSocket?.readyState === WebSocket.OPEN) {
-                            clientSocket.send(JSON.stringify({
-                                type: "POSITION",
-                                flightId,
-                                progress,
-                                ...savedPosition
-                            }));
-                        }
+                        getSockets(clientId).forEach((clientSocket) => {
+                            if (clientSocket.readyState === WebSocket.OPEN) {
+                                clientSocket.send(JSON.stringify({
+                                    type: "POSITION",
+                                    flightId,
+                                    progress,
+                                    ...savedPosition
+                                }));
+                            }
+                        });
                     });
 
                     if (savedPosition.status === "Landed") {
                         getFlightSubscribers(flightId).forEach((clientId: string) => {
-                            const clientSocket = getSocket(clientId) as ExtendedWebSocket | undefined;
-                            if (clientSocket?.readyState === WebSocket.OPEN) {
-                                clientSocket.send(JSON.stringify({
-                                    type: "FLIGHT_LANDED",
-                                    flightId,
-                                    flightNumber
-                                }));
-                            }
+                            getSockets(clientId).forEach((clientSocket) => {
+                                if (clientSocket.readyState === WebSocket.OPEN) {
+                                    clientSocket.send(JSON.stringify({
+                                        type: "FLIGHT_LANDED",
+                                        flightId,
+                                        flightNumber
+                                    }));
+                                }
+                            });
                         });
                         if (timer) clearTimeout(timer);
                         flightSimulationTimers.delete(flightId);
@@ -482,14 +504,16 @@ async function handleBoard(data: any, { socket }: MessageContext) {
         const atcSockets = getFlightSubscribers(data.flightId);
 
         atcSockets.forEach((id: string) => {
-            const s = getSocket(id) as ExtendedWebSocket | undefined;
-            if (s && s.user?.role === "ATC") {
-                s.send(JSON.stringify({
-                    type: "BOARDING_CONFIRMED",
-                    flightId: data.flightId,
-                    passenger: socket.user?.username
-                }));
-            }
+            getSockets(id).forEach((atcSocket) => {
+                const currentSocket = atcSocket as ExtendedWebSocket;
+                if (currentSocket.user?.role === "ATC" && currentSocket.readyState === WebSocket.OPEN) {
+                    currentSocket.send(JSON.stringify({
+                        type: "BOARDING_CONFIRMED",
+                        flightId: data.flightId,
+                        passenger: socket.user?.username
+                    }));
+                }
+            });
         });
     }
 
@@ -542,7 +566,10 @@ export function initSocketServer(port: number, host: string = "0.0.0.0") {
         });
 
         socket.on("close", () => {
-            if (username) removeUser(username);
+            if (username) {
+                removeUser(username, socket);
+                broadcastConnectedUsers();
+            }
         });
 
         socket.on("error", (err: Error) => {

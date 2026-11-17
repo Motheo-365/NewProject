@@ -1,12 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.execute = execute;
-const { getState, shutdown } = require("../state/serverState");
+const { getState, getAllSockets, shutdown } = require("../state/serverState");
 function execute() {
     console.log("[SERVER] Broadcasting shutdown message...");
     const state = getState();
-    const sockets = state.sockets;
-    sockets.forEach((socket, username) => {
+    const sockets = getAllSockets();
+    sockets.forEach((socket) => {
         try {
             // Notify client
             socket.send(JSON.stringify({
@@ -19,12 +19,12 @@ function execute() {
                     socket.close();
                 }
                 catch (err) {
-                    console.log(`[ERROR] Failed to close socket for ${username}`);
+                    console.log("[ERROR] Failed to close a client socket");
                 }
             }, 100);
         }
         catch (err) {
-            console.log(`[ERROR] Failed to notify ${username}`);
+            console.log("[ERROR] Failed to notify a client socket");
         }
     });
     // Clear system state
