@@ -96,7 +96,7 @@ function scheduleFlightSimulation( flightId: string | number, apiKey: string, di
 
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
-const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
+const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 60;
 
 function broadcastConnectedUsers(): void {
     const users = getConnectedUsers();

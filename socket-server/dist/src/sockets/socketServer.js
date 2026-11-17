@@ -46,7 +46,7 @@ function scheduleFlightSimulation(flightId, apiKey, dispatchedAt) {
 }
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
-const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
+const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 60;
 function broadcastConnectedUsers() {
     const users = (0, serverState_1.getConnectedUsers)();
     const message = JSON.stringify({
