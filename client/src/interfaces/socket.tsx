@@ -56,12 +56,20 @@ export interface DispatchResultMessage {
 
 export interface BoardResultMessage {
     type: 'BOARD_RESULT';
+    flightId: number;
     data: ApiResponse<unknown>;
 }
 
 export interface BoardingCallMessage {
     type: 'BOARDING_CALL';
     flightId: number;
+    dispatchedAt?: string;
+}
+
+export interface FlightLandedMessage {
+    type: 'FLIGHT_LANDED';
+    flightId: number;
+    flightNumber: string;
 }
 
 export interface BoardingConfirmedMessage {
@@ -92,6 +100,7 @@ export type SocketServerMessage =
     | DispatchResultMessage
     | BoardResultMessage
     | BoardingCallMessage
+    | FlightLandedMessage
     | BoardingConfirmedMessage
     | ErrorMessage
     | KilledMessage;
@@ -104,6 +113,7 @@ export interface SocketEventMap {
     DISPATCH_RESULT: DispatchResultMessage;
     BOARD_RESULT: BoardResultMessage;
     BOARDING_CALL: BoardingCallMessage;
+    FLIGHT_LANDED: FlightLandedMessage;
     BOARDING_CONFIRMED: BoardingConfirmedMessage;
     ERROR: ErrorMessage;
     KILLED: KilledMessage;

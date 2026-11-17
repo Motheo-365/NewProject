@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Flight } from '../interfaces/api';
 import FlightMap from '../components/map';
 import Loader from '../components/Loader';
+import ConfirmationBox from '../components/confirmationBox';
+
 import { apiService } from '../services/apiService';
+import { clearApiKey, getApiKey } from '../services/apiKeyCookie';
 import { socketService } from '../services/socketService';
 
 import "../styles/atc.css"
@@ -27,6 +30,7 @@ export default function AtcPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isTracking, setIsTracking] = useState(false);
+  const [isLogoutConfirmationOpen, setIsLogoutConfirmationOpen] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(() => socketService.isConnected());
   const [boardingCountdown, setBoardingCountdown] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,7 +43,7 @@ export default function AtcPage() {
   const boardingTimersRef = useRef(new Map<number, number>());
   const boardingDeadlinesRef = useRef(new Map<number, number>());
   const boardingStatusesRef = useRef(new Map<number, Map<string, boolean>>());
-  const apiKey = localStorage.getItem('api_key');
+  const apiKey = getApiKey();
 
   useEffect(() => {
     flightsRef.current = flights;
@@ -52,6 +56,14 @@ export default function AtcPage() {
       ...current,
     ]);
   }, []);
+
+  const handleLogout = () => {
+    socketService.disconnect();
+    clearApiKey();
+    localStorage.removeItem('user_type');
+    localStorage.removeItem('username');
+    window.location.assign('/');
+  }
 
   const startBoardingWindow = useCallback((flightId: number) => {
     const previousTimer = boardingTimersRef.current.get(flightId);
@@ -355,6 +367,15 @@ export default function AtcPage() {
           <h1>Air Traffic Control</h1>
           <p>Flight Operations Dashboard</p>
         </div>
+
+        <button
+          type="button"
+          className="logout-btn"
+          onClick={() => setIsLogoutConfirmationOpen(true)}
+        >
+          Logout
+        </button>
+
         <div className="stats">
           <div className="stat-card"><h2>{flights.length}</h2><p>Total Flights</p></div>
           <div className="stat-card">
@@ -578,6 +599,17 @@ export default function AtcPage() {
           </section>
         )}
       </section>
+
+      <ConfirmationBox
+          isOpen={isLogoutConfirmationOpen}
+          title="Logout"
+          message="Are you sure you want to log out of the Air Traffic Control dashboard?"
+          confirmText="Yes, logout"
+          cancelText="Stay logged in"
+          variant="danger"
+          onConfirm={handleLogout}
+          onCancel={() => setIsLogoutConfirmationOpen(false)}
+      />
     </main>
   );
 }

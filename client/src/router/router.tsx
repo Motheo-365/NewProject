@@ -2,10 +2,11 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import type { ReactNode } from 'react';
 import LoginPage from '../pages/login';
 import AtcPage from '../pages/atc';
-import Map from '../components/map';
+import Passenger from '../pages/passenger';
+import { getApiKey } from '../services/apiKeyCookie';
 
 function RolePage({ role, children }: { role: 'ATC' | 'Passenger'; children?: ReactNode }) {
-  const apiKey = localStorage.getItem('api_key');
+  const apiKey = getApiKey();
   const userType = localStorage.getItem('user_type');
 
   if (!apiKey || (userType !== 'ATC' && userType !== 'Passenger')) {
@@ -29,7 +30,7 @@ export function Router() {
           path="/passenger"
           element={(
             <RolePage role="Passenger">
-              <Map apiKey={localStorage.getItem('api_key') ?? ''} />
+              <Passenger />
             </RolePage>
           )}
         />

@@ -59,6 +59,11 @@ export interface Flight {
   destination: Airport;
 
   dispatched_at?: string;
+  booking_details?: {
+    seat_number: string;
+    status: string;
+    booked_at: string;
+  };
 
   passengers?: Passenger[];
   passenger_count?: number;

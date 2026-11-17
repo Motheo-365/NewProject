@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
 import Loader from '../components/Loader';
 import type { LoginResponse } from '../interfaces/api';
+import { setApiKey } from '../services/apiKeyCookie';
 import { apiService } from '../services/apiService';
 import { socketService } from '../services/socketService';
 
@@ -15,6 +16,23 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    console.clear();
+
+    console.log('%c=== TEST LOGIN DETAILS ===', 'color:#00bcd4;font-size:16px;font-weight:bold;');
+    console.log('%cATC', 'color:#4CAF50;font-weight:bold;');
+    console.log('Email: amberblue@gmail.com');
+    console.log('Password: AmberBlu3$');
+
+    console.log('');
+
+    console.log('%cPassenger', 'color:#2196F3;font-weight:bold;');
+    console.log('Email: tasha-test@gmail.com');
+    console.log('Password: Test123#45');
+
+    console.log('');
+  }, []);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -54,7 +72,7 @@ export default function LoginPage() {
 
       const userType = normalizedRole === 'ATC' ? 'ATC' : 'Passenger';
       socketService.disconnect();
-      localStorage.setItem('api_key', user.api_key);
+      setApiKey(user.api_key);
       localStorage.setItem('user_type', userType);
       localStorage.setItem('username', user.username);
       navigate(userType === 'ATC' ? '/atc' : '/passenger');
@@ -65,6 +83,7 @@ export default function LoginPage() {
           : 'An error occurred during login.',
       );
     } finally {
+      console.clear();
       setIsLoading(false);
     }
   };

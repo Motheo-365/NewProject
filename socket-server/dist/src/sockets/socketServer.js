@@ -10,6 +10,7 @@ const apiService_1 = require("../services/apiService");
 const serverState_1 = require("../state/serverState");
 const flightSimulationTimers = new Map();
 const FLIGHT_SIMULATION_TICK_MS = 250;
+const BOARDING_WINDOW_MS = 60_000;
 const SIMULATED_MINUTES_PER_FLIGHT_HOUR = 1;
 function isRecord(value) {
     return typeof value === "object" && value !== null;
@@ -190,36 +191,52 @@ async function handleDispatch(data, { socket }) {
     console.log("Dispatch API response:", res);
     if (res.status === "success") {
         (0, serverState_1.subscribeToFlight)(socket.user.username, data.flightId);
-        void startFlightSimulation(data.flightId, socket.user.api_key, socket);
-        const flightRes = await (0, apiService_1.request)({
-            type: "GetFlight",
-            api_key: socket.user.api_key,
-            flight_id: data.flightId
-        });
-        if (flightRes.status === "success") {
-            const passengers = flightRes.data.passengers || [];
-            passengers.forEach((p) => {
-                const s = (0, serverState_1.getSocket)(p.username);
-                if (s?.readyState === ws_1.default.OPEN) {
-                    s.send(JSON.stringify({
-                        type: "BOARDING_CALL",
-                        flightId: data.flightId
-                    }));
-                }
-            });
-        }
-        else {
+        socket.send(JSON.stringify({
+            type: "TRACK_SUCCESS",
+            flightId: data.flightId
+        }));
+        const dispatchData = isRecord(res.data) ? res.data : {};
+        const dispatchedAt = typeof dispatchData.dispatched_at === "string"
+            ? dispatchData.dispatched_at
+            : undefined;
+        const dispatchTimestamp = dispatchedAt ? new Date(dispatchedAt).getTime() : Number.NaN;
+        const passengers = Array.isArray(dispatchData.passengers) ? dispatchData.passengers : [];
+        if (!dispatchedAt || !Number.isFinite(dispatchTimestamp)) {
             socket.send(JSON.stringify({
                 type: "ERROR",
-                message: flightRes.message || "Flight dispatched, but passenger boarding calls could not be sent."
+                message: "Flight dispatched, but its boarding timestamp was missing or invalid."
             }));
         }
+        passengers.forEach((passenger) => {
+            if (!isRecord(passenger) || typeof passenger.username !== "string")
+                return;
+            const passengerSocket = (0, serverState_1.getSocket)(passenger.username);
+            if (passengerSocket?.readyState === ws_1.default.OPEN) {
+                passengerSocket.send(JSON.stringify({
+                    type: "BOARDING_CALL",
+                    flightId: data.flightId,
+                    ...(dispatchedAt ? { dispatchedAt } : {})
+                }));
+            }
+        });
         if (socket.readyState === ws_1.default.OPEN) {
             socket.send(JSON.stringify({
                 type: "BOARDING_CALL",
-                flightId: data.flightId
+                flightId: data.flightId,
+                ...(dispatchedAt ? { dispatchedAt } : {})
             }));
         }
+        const previousTimer = flightSimulationTimers.get(data.flightId);
+        if (previousTimer)
+            clearTimeout(previousTimer);
+        const boardingDelay = Number.isFinite(dispatchTimestamp)
+            ? Math.max(0, dispatchTimestamp + BOARDING_WINDOW_MS - Date.now())
+            : BOARDING_WINDOW_MS;
+        const boardingTimer = setTimeout(() => {
+            flightSimulationTimers.delete(data.flightId);
+            void startFlightSimulation(data.flightId, socket.user.api_key, socket);
+        }, boardingDelay);
+        flightSimulationTimers.set(data.flightId, boardingTimer);
     }
     socket.send(JSON.stringify({
         type: "DISPATCH_RESULT",
@@ -233,9 +250,6 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
             controllerSocket.send(JSON.stringify({ type: "ERROR", message }));
         }
     };
-    const currentTimer = flightSimulationTimers.get(flightId);
-    if (currentTimer)
-        clearTimeout(currentTimer);
     try {
         const response = await (0, apiService_1.request)({
             type: "GetFlight",
@@ -248,6 +262,9 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
         const origin = readCoordinates(response.data.origin);
         const destination = readCoordinates(response.data.destination);
         const durationHours = response.data.flight_duration_hours;
+        const flightNumber = typeof response.data.flight_number === "string"
+            ? response.data.flight_number
+            : String(flightId);
         if (!origin
             || !destination
             || typeof durationHours !== "number"
@@ -256,14 +273,18 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
             throw new Error("Flight route coordinates or duration are invalid.");
         }
         const durationMilliseconds = Math.max(durationHours * SIMULATED_MINUTES_PER_FLIGHT_HOUR * 60_000, FLIGHT_SIMULATION_TICK_MS);
-        const startTime = Date.now();
+        let flightStartedAt = null;
         let reportedPersistenceFailure = false;
         let timer;
         const updatePosition = async () => {
             try {
-                const progress = Math.min((Date.now() - startTime) / durationMilliseconds, 1);
+                const progress = flightStartedAt === null
+                    ? 0
+                    : Math.min((Date.now() - flightStartedAt) / durationMilliseconds, 1);
                 const position = interpolateGreatCircle(origin, destination, progress);
-                const status = progress >= 1 ? "Landed" : "In Flight";
+                const status = flightStartedAt === null
+                    ? "In Flight"
+                    : progress >= 1 ? "Landed" : undefined;
                 const updateResponse = await (0, apiService_1.request)({
                     type: "UpdateFlightPosition",
                     api_key: apiKey,
@@ -291,6 +312,9 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                         longitude: updateResponse.data.longitude,
                         status: updateResponse.data.status
                     };
+                    if (flightStartedAt === null && savedPosition.status === "In Flight") {
+                        flightStartedAt = Date.now();
+                    }
                     (0, serverState_1.getFlightSubscribers)(flightId).forEach((clientId) => {
                         const clientSocket = (0, serverState_1.getSocket)(clientId);
                         if (clientSocket?.readyState === ws_1.default.OPEN) {
@@ -301,13 +325,23 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                             }));
                         }
                     });
-                }
-                if (progress >= 1) {
-                    if (timer)
-                        clearTimeout(timer);
-                    flightSimulationTimers.delete(flightId);
-                    (0, logger_1.info)(`Flight ${flightId} landed. Simulation stopped.`);
-                    return;
+                    if (savedPosition.status === "Landed") {
+                        (0, serverState_1.getFlightSubscribers)(flightId).forEach((clientId) => {
+                            const clientSocket = (0, serverState_1.getSocket)(clientId);
+                            if (clientSocket?.readyState === ws_1.default.OPEN) {
+                                clientSocket.send(JSON.stringify({
+                                    type: "FLIGHT_LANDED",
+                                    flightId,
+                                    flightNumber
+                                }));
+                            }
+                        });
+                        if (timer)
+                            clearTimeout(timer);
+                        flightSimulationTimers.delete(flightId);
+                        (0, logger_1.info)(`Flight ${flightId} landed. Simulation stopped.`);
+                        return;
+                    }
                 }
             }
             catch (simulationError) {
@@ -362,6 +396,7 @@ async function handleBoard(data, { socket }) {
     }
     socket.send(JSON.stringify({
         type: "BOARD_RESULT",
+        flightId: data.flightId,
         data: res
     }));
 }

@@ -335,7 +335,7 @@ function Map({ apiKey, activeFlight }: MapProps) {
           <h2>{activeFlight ? 'Current flight' : 'Flight routes'}</h2>
           <p>
             {activeFlight
-              ? 'Showing the route selected in the ATC flight list.'
+              ? 'Showing the route selected in your flight list.'
               : 'Routes and airport locations from your flight data.'}
           </p>
         </div>

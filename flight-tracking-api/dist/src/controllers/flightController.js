@@ -226,23 +226,53 @@ const dispatchFlight = async (req, res) => {
     if (user?.type !== 'ATC') {
         return (0, response_1.sendResponse)(res, 'error', 'user is not authorized to dispatch flights', null, 400);
     }
+    let client = null;
+    let transactionOpen = false;
     try {
+        client = await db_1.default.connect();
+        await client.query('BEGIN');
+        transactionOpen = true;
         const timestamp = new Date().toISOString();
         const newStatus = 'Boarding';
         const updateQuery = `
       UPDATE flights
       SET status = $1, dispatched_at = $2
       WHERE id = $3 AND status = 'Scheduled'
-      RETURNING id
+      RETURNING id, dispatched_at
     `;
-        const updateResult = await db_1.default.query(updateQuery, [newStatus, timestamp, flight_id]);
+        const updateResult = await client.query(updateQuery, [newStatus, timestamp, flight_id]);
         if (updateResult.rowCount === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return (0, response_1.sendResponse)(res, 'error', 'no scheduled flight found with that id', null, 400);
         }
-        return (0, response_1.sendResponse)(res, 'success', 'flight has been successfully dispatched and is now boarding');
+        const passengerResult = await client.query(`SELECT u.username
+       FROM passenger_flights pf
+       INNER JOIN users u ON u.id = pf.user_id
+       WHERE pf.flight_id = $1
+         AND COALESCE(UPPER(pf.status::text), '') NOT IN ('CANCELLED', 'NO_SHOW')
+       ORDER BY u.username ASC`, [flight_id]);
+        await client.query('COMMIT');
+        transactionOpen = false;
+        return (0, response_1.sendResponse)(res, 'success', 'flight has been successfully dispatched and is now boarding', {
+            flight_id: updateResult.rows[0].id,
+            dispatched_at: updateResult.rows[0].dispatched_at,
+            passengers: passengerResult.rows,
+        });
     }
     catch (err) {
+        if (client && transactionOpen) {
+            try {
+                await client.query('ROLLBACK');
+            }
+            catch (rollbackError) {
+                console.error('Unable to roll back flight dispatch transaction:', rollbackError);
+            }
+        }
         return (0, response_1.sendResponse)(res, 'error', err.message, null, 500);
+    }
+    finally {
+        client?.release();
     }
 };
 exports.dispatchFlight = dispatchFlight;
@@ -266,43 +296,107 @@ const updateFlightPosition = async (req, res) => {
         || longitude > 180) {
         return (0, response_1.sendResponse)(res, 'error', 'missing required fields', null, 400);
     }
-    const validStatuses = ['Scheduled', 'Boarding', 'In Flight', 'Landed'];
-    if (status && !validStatuses.includes(status)) {
+    if (status !== undefined && status !== 'In Flight' && status !== 'Landed') {
         return (0, response_1.sendResponse)(res, 'error', 'invalid status', null, 400);
     }
+    let client = null;
+    let transactionOpen = false;
     try {
-        let updateResult;
-        if (status) {
-            const query = `
-        UPDATE flights 
-        SET current_latitude = $1, current_longitude = $2, status = $3
-        WHERE id = $4
-        RETURNING id, current_latitude, current_longitude, status
-      `;
-            updateResult = await db_1.default.query(query, [latitude, longitude, status, flight_id]);
-        }
-        else {
-            const queryWithoutStatus = `
-        UPDATE flights 
-        SET current_latitude = $1, current_longitude = $2
-        WHERE id = $3
-        RETURNING id, current_latitude, current_longitude, status
-      `;
-            updateResult = await db_1.default.query(queryWithoutStatus, [latitude, longitude, flight_id]);
-        }
-        const updatedFlight = updateResult.rows[0];
-        if (!updatedFlight) {
+        client = await db_1.default.connect();
+        await client.query('BEGIN');
+        transactionOpen = true;
+        const flightResult = await client.query(`SELECT f.status, f.dispatched_at, destination.latitude AS destination_latitude,
+        destination.longitude AS destination_longitude
+       FROM flights f
+       INNER JOIN airports destination ON f.destination_airport_id = destination.id
+       WHERE f.id = $1
+       FOR UPDATE OF f`, [flight_id]);
+        if (flightResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return (0, response_1.sendResponse)(res, 'error', 'flight not found', null, 404);
         }
+        const flight = flightResult.rows[0];
+        let transitionToInFlight = false;
+        if (status === 'In Flight') {
+            if (flight.status === 'Boarding') {
+                const dispatchedAt = flight.dispatched_at
+                    ? new Date(flight.dispatched_at).getTime()
+                    : Number.NaN;
+                if (!Number.isFinite(dispatchedAt) || Date.now() - dispatchedAt < 60_000) {
+                    await client.query('ROLLBACK');
+                    transactionOpen = false;
+                    return (0, response_1.sendResponse)(res, 'error', 'boarding window has not expired', null, 400);
+                }
+                transitionToInFlight = true;
+            }
+            else if (flight.status !== 'In Flight') {
+                await client.query('ROLLBACK');
+                transactionOpen = false;
+                return (0, response_1.sendResponse)(res, 'error', 'flight cannot transition to In Flight from its current status', null, 400);
+            }
+        }
+        else if (status === 'Landed') {
+            if (flight.status !== 'In Flight') {
+                await client.query('ROLLBACK');
+                transactionOpen = false;
+                return (0, response_1.sendResponse)(res, 'error', 'flight must be In Flight before it can land', null, 400);
+            }
+            const destinationLatitude = Number(flight.destination_latitude);
+            const destinationLongitude = Number(flight.destination_longitude);
+            if (Math.abs(latitude - destinationLatitude) > 0.000001
+                || Math.abs(longitude - destinationLongitude) > 0.000001) {
+                await client.query('ROLLBACK');
+                transactionOpen = false;
+                return (0, response_1.sendResponse)(res, 'error', 'landed position must match the destination airport', null, 400);
+            }
+        }
+        else if (flight.status !== 'In Flight') {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
+            return (0, response_1.sendResponse)(res, 'error', 'positions can only be updated while the flight is In Flight', null, 400);
+        }
+        const updateResult = status
+            ? await client.query(`UPDATE flights
+           SET current_latitude = $1, current_longitude = $2, status = $3
+           WHERE id = $4
+           RETURNING id, current_latitude, current_longitude, status`, [latitude, longitude, status, flight_id])
+            : await client.query(`UPDATE flights
+           SET current_latitude = $1, current_longitude = $2
+           WHERE id = $3
+           RETURNING id, current_latitude, current_longitude, status`, [latitude, longitude, flight_id]);
+        let noShowCount = 0;
+        if (transitionToInFlight) {
+            const noShowResult = await client.query(`UPDATE passenger_flights
+         SET status = 'NO_SHOW'
+         WHERE flight_id = $1
+           AND COALESCE(UPPER(status::text), '') NOT IN ('BOARDED', 'CANCELLED', 'NO_SHOW')`, [flight_id]);
+            noShowCount = noShowResult.rowCount ?? 0;
+        }
+        await client.query('COMMIT');
+        transactionOpen = false;
+        const updatedFlight = updateResult.rows[0];
         return (0, response_1.sendResponse)(res, 'success', 'flight position updated', {
             flight_id: updatedFlight.id,
             latitude: Number(updatedFlight.current_latitude),
             longitude: Number(updatedFlight.current_longitude),
             status: updatedFlight.status,
+            no_show_count: noShowCount,
         });
     }
     catch (err) {
+        if (client && transactionOpen) {
+            try {
+                await client.query('ROLLBACK');
+            }
+            catch (rollbackError) {
+                console.error('Unable to roll back flight position transaction:', rollbackError);
+            }
+        }
         return (0, response_1.sendResponse)(res, 'error', err.message, null, 500);
+    }
+    finally {
+        client?.release();
     }
 };
 exports.updateFlightPosition = updateFlightPosition;
@@ -318,37 +412,64 @@ const boardFlight = async (req, res) => {
     if (user.type !== 'PASSENGER') {
         return (0, response_1.sendResponse)(res, 'error', 'user is not a passenger', null, 400);
     }
-    const userId = user.id;
+    let client = null;
+    let transactionOpen = false;
     try {
-        // Check if booked
-        const bookingQuery = 'SELECT 1 FROM passenger_flights WHERE user_id = $1 AND flight_id = $2';
-        const bookingResult = await db_1.default.query(bookingQuery, [userId, flight_id]);
-        if (bookingResult.rows.length === 0) {
+        client = await db_1.default.connect();
+        await client.query('BEGIN');
+        transactionOpen = true;
+        const flightResult = await client.query('SELECT status, dispatched_at FROM flights WHERE id = $1 FOR UPDATE', [flight_id]);
+        const bookingResult = await client.query(`SELECT status AS booking_status
+       FROM passenger_flights
+       WHERE flight_id = $1 AND user_id = $2
+       FOR UPDATE`, [flight_id, user.id]);
+        if (flightResult.rows.length === 0 || bookingResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return (0, response_1.sendResponse)(res, 'error', 'passenger is not booked on this flight', null, 400);
         }
-        // Check dispatch time
-        const flightQuery = 'SELECT dispatched_at FROM flights WHERE id = $1 AND dispatched_at IS NOT NULL';
-        const flightResult = await db_1.default.query(flightQuery, [flight_id]);
-        if (flightResult.rows.length === 0) {
-            return (0, response_1.sendResponse)(res, 'error', 'flight has not been dispatched yet', null, 400);
+        const booking = bookingResult.rows[0];
+        const flight = flightResult.rows[0];
+        if (String(booking.booking_status).toUpperCase() === 'BOARDED') {
+            await client.query('COMMIT');
+            transactionOpen = false;
+            return (0, response_1.sendResponse)(res, 'success', 'boarding was already confirmed');
         }
-        const dispatchedAt = new Date(flightResult.rows[0].dispatched_at).getTime();
-        const now = new Date().getTime();
-        const secondsPassed = (now - dispatchedAt) / 1000;
-        if (secondsPassed > 60) {
-            return (0, response_1.sendResponse)(res, 'error', 'boarding window has expired (60 seconds passed)', null, 400);
+        const dispatchedAt = flight.dispatched_at
+            ? new Date(flight.dispatched_at).getTime()
+            : Number.NaN;
+        if (flight.status !== 'Boarding'
+            || !Number.isFinite(dispatchedAt)
+            || Date.now() - dispatchedAt >= 60_000) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
+            return (0, response_1.sendResponse)(res, 'error', 'boarding window has expired or is not open', null, 400);
         }
-        const newStatus = 'BOARDED';
-        const updateQuery = `
-      UPDATE passenger_flights
-      SET status = $1
-      WHERE user_id = $2 AND flight_id = $3
-    `;
-        await db_1.default.query(updateQuery, [newStatus, userId, flight_id]);
+        if (['CANCELLED', 'NO_SHOW'].includes(String(booking.booking_status).toUpperCase())) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
+            return (0, response_1.sendResponse)(res, 'error', 'this booking is no longer eligible for boarding', null, 400);
+        }
+        await client.query(`UPDATE passenger_flights
+       SET status = 'BOARDED'
+       WHERE user_id = $1 AND flight_id = $2`, [user.id, flight_id]);
+        await client.query('COMMIT');
+        transactionOpen = false;
         return (0, response_1.sendResponse)(res, 'success', 'boarding confirmed successfully');
     }
     catch (err) {
+        if (client && transactionOpen) {
+            try {
+                await client.query('ROLLBACK');
+            }
+            catch (rollbackError) {
+                console.error('Unable to roll back passenger boarding transaction:', rollbackError);
+            }
+        }
         return (0, response_1.sendResponse)(res, 'error', err.message, null, 500);
+    }
+    finally {
+        client?.release();
     }
 };
 exports.boardFlight = boardFlight;

@@ -1,9 +1,10 @@
 import type { LoginResponse } from '../interfaces/api';
+import { clearApiKey, setApiKey } from './apiKeyCookie';
 
 const SESSION_STORAGE_KEY = 'flight-tracking-user';
 
 export type UserRole = 'ATC' | 'Passenger';
-export type SessionUser = Omit<LoginResponse, 'type'> & { type: UserRole };
+export type SessionUser = Pick<LoginResponse, 'username'> & { type: UserRole };
 export type DashboardPath = '/atc' | '/passenger';
 
 function isSessionUser(value: unknown): value is SessionUser {
@@ -11,7 +12,6 @@ function isSessionUser(value: unknown): value is SessionUser {
 
   const user = value as Record<string, unknown>;
   return typeof user.username === 'string'
-    && typeof user.api_key === 'string'
     && (user.type === 'ATC' || user.type === 'Passenger');
 }
 
@@ -40,9 +40,18 @@ export function saveCurrentUser(user: LoginResponse): void {
     throw new Error('The login response does not contain a supported user account.');
   }
 
-  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+  setApiKey(user.api_key);
+  localStorage.setItem(
+    SESSION_STORAGE_KEY,
+    JSON.stringify({ username: user.username, type: rolePath === '/atc' ? 'ATC' : 'Passenger' }),
+  );
+  localStorage.setItem('username', user.username);
+  localStorage.setItem('user_type', rolePath === '/atc' ? 'ATC' : 'Passenger');
 }
 
 export function clearCurrentUser(): void {
   localStorage.removeItem(SESSION_STORAGE_KEY);
+  localStorage.removeItem('username');
+  localStorage.removeItem('user_type');
+  clearApiKey();
 }

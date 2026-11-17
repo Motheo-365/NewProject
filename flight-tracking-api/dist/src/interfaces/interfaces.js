@@ -6,6 +6,7 @@ var FlightStatus;
     FlightStatus["CHECKED_IN"] = "CHECKED IN";
     FlightStatus["Cancelled"] = "CANCELLED";
     FlightStatus["BOARDED"] = "BOARDED";
+    FlightStatus["NO_SHOW"] = "NO_SHOW";
 })(FlightStatus || (FlightStatus = {}));
 var UserType;
 (function (UserType) {
