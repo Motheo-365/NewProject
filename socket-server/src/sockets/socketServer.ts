@@ -32,7 +32,68 @@ interface Coordinates {
     longitude: number;
 }
 
-const flightSimulationTimers = new Map<string | number, NodeJS.Timeout>();
+type FlightLifecycle = {
+    phase: "boarding" | "starting" | "flying";
+    timer?: NodeJS.Timeout;
+};
+const flightLifecycles = new Map<string, FlightLifecycle>();
+
+function getFlightKey(flightId: string | number): string {
+    return String(flightId);
+}
+
+function stopFlightLifecycle(flightId: string | number): void {
+    const key = getFlightKey(flightId);
+    const lifecycle = flightLifecycles.get(key);
+
+    if (lifecycle?.timer) {
+        clearTimeout(lifecycle.timer);
+    }
+
+    flightLifecycles.delete(key);
+}
+
+function scheduleFlightSimulation( flightId: string | number, apiKey: string, dispatchedAt: string ): void {
+    const key = getFlightKey(flightId);
+
+    // Do not schedule a duplicate lifecycle.
+    if (flightLifecycles.has(key)) {
+        return;
+    }
+
+    const dispatchTimestamp = new Date(dispatchedAt).getTime();
+
+    if (!Number.isFinite(dispatchTimestamp)) {
+        error(`Invalid dispatched_at timestamp for flight ${flightId}`);
+        return;
+    }
+
+    const simulationStartTime = dispatchTimestamp + BOARDING_WINDOW_MS;
+    const remainingBoardingTime = Math.max(
+        0,
+        simulationStartTime - Date.now()
+    );
+
+    const lifecycle: FlightLifecycle = {
+        phase: "boarding"
+    };
+
+    flightLifecycles.set(key, lifecycle);
+
+    lifecycle.timer = setTimeout(() => {
+        lifecycle.phase = "starting";
+        lifecycle.timer = undefined;
+
+        void startFlightSimulation(flightId, apiKey, dispatchedAt);
+    }, remainingBoardingTime);
+
+    info(
+        `Flight ${flightId}: simulation scheduled in ${
+            Math.ceil(remainingBoardingTime / 1000)
+        } seconds.`
+    );
+}
+
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
 const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
@@ -54,6 +115,14 @@ function broadcastConnectedUsers(): void {
         });
 }
 
+function broadcastToFlightSubscribers(flightId: string | number, message: string): void {
+    getFlightSubscribers(flightId).forEach((username) => {
+        getSockets(username).forEach((socket) => {
+            if (socket.readyState === WebSocket.OPEN) socket.send(message);
+        });
+    });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
@@ -68,11 +137,7 @@ function readCoordinates(value: unknown): Coordinates | null {
         : null;
 }
 
-function interpolateGreatCircle(
-    origin: Coordinates,
-    destination: Coordinates,
-    progress: number
-): Coordinates {
+function interpolateGreatCircle( origin: Coordinates, destination: Coordinates, progress: number ): Coordinates {
     const toRadians = (degrees: number) => degrees * Math.PI / 180;
     const toDegrees = (radians: number) => radians * 180 / Math.PI;
     const originLatitude = toRadians(origin.latitude);
@@ -201,8 +266,6 @@ async function handleAuth(data: any, { socket, setUsername }: MessageContext) {
 }
 
 async function handleTrack(data: any, { socket }: MessageContext) {
-    const { flightId } = data;
-
     if (!socket.user) {
         socket.send(JSON.stringify({
             type: "ERROR",
@@ -211,34 +274,66 @@ async function handleTrack(data: any, { socket }: MessageContext) {
         return;
     }
 
-    if (!flightId) {
+    const flightId = data?.flightId;
+    if (
+        (typeof flightId !== "number" && typeof flightId !== "string")
+        || !String(flightId).trim()
+        || !Number.isSafeInteger(Number(flightId))
+        || Number(flightId) <= 0
+    ) {
         socket.send(JSON.stringify({
             type: "ERROR",
-            message: "Missing flightId"
+            message: "A valid flightId is required."
         }));
         return;
     }
 
-    const res: any = await request({
+    const normalizedFlightId = Number(flightId);
+    const res = await request({
         type: "GetFlight",
         api_key: socket.user.api_key,
-        flight_id: flightId
+        flight_id: normalizedFlightId
     });
 
-    if (res.status !== "success") {
+    if (res.status !== "success" || !isRecord(res.data)) {
         socket.send(JSON.stringify({
             type: "ERROR",
-            message: res.message || "Unable to track this flight."
+            message: res.message || "Unable to access this flight."
         }));
         return;
     }
 
-    subscribeToFlight(socket.user.username, flightId);
+    const flight = res.data;
+
+    subscribeToFlight(socket.user.username, normalizedFlightId);
+
+    const status =
+        typeof flight.status === "string"
+            ? flight.status.toLowerCase()
+            : "";
+
+    const dispatchedAt =
+        typeof flight.dispatched_at === "string"
+            ? flight.dispatched_at
+            : undefined;
+
+    if (
+        socket.user.role === "ATC" &&
+        (status === "boarding" || status === "in flight") &&
+        dispatchedAt
+    ) {
+        scheduleFlightSimulation(
+            normalizedFlightId,
+            socket.user.api_key,
+            dispatchedAt
+        );
+    }
+
     info(`${socket.user.username} tracking ${flightId}`);
 
     socket.send(JSON.stringify({
         type: "TRACK_SUCCESS",
-        flightId
+        flightId: normalizedFlightId
     }));
 }
 
@@ -259,19 +354,32 @@ async function handleDispatch(data: any, { socket }: MessageContext) {
         return;
     }
 
-    const res: any = await request({
+    const flightId = data?.flightId;
+    if (
+        (typeof flightId !== "number" && typeof flightId !== "string")
+        || !String(flightId).trim()
+        || !Number.isSafeInteger(Number(flightId))
+        || Number(flightId) <= 0
+    ) {
+        socket.send(JSON.stringify({
+            type: "ERROR",
+            message: "A valid flightId is required."
+        }));
+        return;
+    }
+
+    const normalizedFlightId = Number(flightId);
+    const res = await request({
         type: "DispatchFlight",
         api_key: socket.user.api_key,
-        flight_id: data.flightId
+        flight_id: normalizedFlightId
     });
 
-    console.log("Dispatch API response:", res);
-
     if (res.status === "success") {
-        subscribeToFlight(socket.user.username, data.flightId);
+        subscribeToFlight(socket.user.username, normalizedFlightId);
         socket.send(JSON.stringify({
             type: "TRACK_SUCCESS",
-            flightId: data.flightId
+            flightId: normalizedFlightId
         }));
 
         const dispatchData = isRecord(res.data) ? res.data : {};
@@ -294,7 +402,7 @@ async function handleDispatch(data: any, { socket }: MessageContext) {
                 if (passengerSocket.readyState === WebSocket.OPEN) {
                     passengerSocket.send(JSON.stringify({
                         type: "BOARDING_CALL",
-                        flightId: data.flightId,
+                        flightId: normalizedFlightId,
                         ...(dispatchedAt ? { dispatchedAt } : {})
                     }));
                 }
@@ -304,176 +412,225 @@ async function handleDispatch(data: any, { socket }: MessageContext) {
         if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({
                 type: "BOARDING_CALL",
-                flightId: data.flightId,
+                flightId: normalizedFlightId,
                 ...(dispatchedAt ? { dispatchedAt } : {})
             }));
         }
 
-        const previousTimer = flightSimulationTimers.get(data.flightId);
-        if (previousTimer) clearTimeout(previousTimer);
-        const boardingDelay = Number.isFinite(dispatchTimestamp)
-            ? Math.max(0, dispatchTimestamp + BOARDING_WINDOW_MS - Date.now())
-            : BOARDING_WINDOW_MS;
-        const boardingTimer = setTimeout(() => {
-            flightSimulationTimers.delete(data.flightId);
-            void startFlightSimulation(data.flightId, socket.user!.api_key, socket);
-        }, boardingDelay);
-        flightSimulationTimers.set(data.flightId, boardingTimer);
+        if (dispatchedAt && Number.isFinite(dispatchTimestamp)) {
+            scheduleFlightSimulation(
+                normalizedFlightId,
+                socket.user.api_key,
+                dispatchedAt
+            );
+        }
     }
 
-    socket.send(JSON.stringify({
-        type: "DISPATCH_RESULT",
-        data: res
-    }));
+    if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: "DISPATCH_RESULT",
+            data: res
+        }));
+    }
 }
 
-async function startFlightSimulation(
-    flightId: string | number,
-    apiKey: string,
-    controllerSocket: ExtendedWebSocket
-) {
-    const reportFailure = (message: string) => {
-        error(message);
-        if (controllerSocket.readyState === WebSocket.OPEN) {
-            controllerSocket.send(JSON.stringify({ type: "ERROR", message }));
-        }
-    };
+async function startFlightSimulation( flightId: string | number, apiKey: string, dispatchedAt: string ): Promise<void> {
+    const key = getFlightKey(flightId);
+    const lifecycle = flightLifecycles.get(key);
+
+    if (!lifecycle || lifecycle.phase !== "starting") {
+        return;
+    }
+
+    // Lock this flight before making any asynchronous API calls.
+    lifecycle.phase = "flying";
 
     try {
-        const response = await request({
+        const response: any = await request({
             type: "GetFlight",
             api_key: apiKey,
             flight_id: flightId
         });
 
-        if (response.status !== "success" || !isRecord(response.data)) {
-            throw new Error(response.message || "Unable to load flight route for simulation.");
+        if (
+            response.status !== "success" ||
+            !isRecord(response.data)
+        ) {
+            throw new Error(
+                response.message || "Unable to load flight route."
+            );
         }
 
+        let hasEnteredInFlight =
+            typeof response.data.status === "string"
+            && response.data.status.toLowerCase() === "in flight";
         const origin = readCoordinates(response.data.origin);
         const destination = readCoordinates(response.data.destination);
         const durationHours = response.data.flight_duration_hours;
-        const flightNumber = typeof response.data.flight_number === "string"
-            ? response.data.flight_number
-            : String(flightId);
+
         if (
-            !origin
-            || !destination
-            || typeof durationHours !== "number"
-            || !Number.isFinite(durationHours)
-            || durationHours <= 0
+            !origin ||
+            !destination ||
+            typeof durationHours !== "number" ||
+            !Number.isFinite(durationHours) ||
+            durationHours <= 0
         ) {
             throw new Error("Flight route coordinates or duration are invalid.");
         }
 
+        const dispatchTimestamp = new Date(dispatchedAt).getTime();
+
+        if (!Number.isFinite(dispatchTimestamp)) {
+            throw new Error("Invalid flight dispatch timestamp.");
+        }
+
+        const simulationStartTime =
+            dispatchTimestamp + BOARDING_WINDOW_MS;
+
         const durationMilliseconds = Math.max(
-            durationHours * SIMULATED_SECONDS_PER_FLIGHT_HOUR * 1_000,
+            durationHours *
+                SIMULATED_SECONDS_PER_FLIGHT_HOUR *
+                1000,
             1
         );
-        let flightStartedAt: number | null = null;
-        let reportedPersistenceFailure = false;
-        let timer: NodeJS.Timeout | undefined;
+        let lastReportedError: string | null = null;
 
-        const updatePosition = async () => {
+        lifecycle.phase = "flying";
+
+        const updatePosition = async (): Promise<void> => {
+            // The lifecycle may have been stopped while an API request
+            // was in progress.
+            if (flightLifecycles.get(key) !== lifecycle) {
+                return;
+            }
+
             try {
-                const progress = flightStartedAt === null
-                    ? 0
-                    : Math.min((Date.now() - flightStartedAt) / durationMilliseconds, 1);
-                const position = interpolateGreatCircle(origin, destination, progress);
-                const status = flightStartedAt === null
-                    ? "In Flight"
-                    : progress >= 1 ? "Landed" : undefined;
+                // Calculate progress from the original dispatch time.
+                const elapsedTime = Math.max(
+                    0,
+                    Date.now() - simulationStartTime
+                );
 
-                const updateResponse = await request({
+                const progress = Math.min(
+                    elapsedTime / durationMilliseconds,
+                    1
+                );
+
+                const position = interpolateGreatCircle(
+                    origin,
+                    destination,
+                    progress
+                );
+
+                const landed = progress >= 1 && hasEnteredInFlight;
+
+                const updateResponse: any = await request({
                     type: "UpdateFlightPosition",
                     api_key: apiKey,
                     flight_id: flightId,
                     latitude: position.latitude,
                     longitude: position.longitude,
-                    status
+                    status: landed ? "Landed" : "In Flight"
                 });
+
                 if (updateResponse.status !== "success") {
-                    if (!reportedPersistenceFailure) {
-                        reportFailure(
-                            `Flight ${flightId} is moving, but its position could not be saved: ${
-                                updateResponse.message || "position update was rejected."
-                            }`,
-                        );
-                        reportedPersistenceFailure = true;
-                    }
-                } else {
-                    reportedPersistenceFailure = false;
+                    throw new Error(
+                        updateResponse.message ||
+                        "Unable to save flight position."
+                    );
+                }
 
-                    if (
-                        !isRecord(updateResponse.data)
-                        || typeof updateResponse.data.latitude !== "number"
-                        || typeof updateResponse.data.longitude !== "number"
-                        || typeof updateResponse.data.status !== "string"
-                    ) {
-                        throw new Error("Flight API did not return the saved position.");
-                    }
+                if (!isRecord(updateResponse.data)) {
+                    throw new Error(
+                        "The Flight API returned an invalid position."
+                    );
+                }
 
-                    const savedPosition = {
-                        latitude: updateResponse.data.latitude,
-                        longitude: updateResponse.data.longitude,
-                        status: updateResponse.data.status
-                    };
+                const savedLatitude = updateResponse.data.latitude;
+                const savedLongitude = updateResponse.data.longitude;
+                const savedStatus = updateResponse.data.status;
 
-                    if (flightStartedAt === null && savedPosition.status === "In Flight") {
-                        flightStartedAt = Date.now();
-                    }
+                if (
+                    typeof savedLatitude !== "number" ||
+                    typeof savedLongitude !== "number" ||
+                    typeof savedStatus !== "string"
+                ) {
+                    throw new Error(
+                        "The Flight API returned incomplete position data."
+                    );
+                }
 
-                    getFlightSubscribers(flightId).forEach((clientId: string) => {
-                        getSockets(clientId).forEach((clientSocket) => {
-                            if (clientSocket.readyState === WebSocket.OPEN) {
-                                clientSocket.send(JSON.stringify({
-                                    type: "POSITION",
-                                    flightId,
-                                    progress,
-                                    ...savedPosition
-                                }));
-                            }
-                        });
+                if (savedStatus.toLowerCase() === "in flight") {
+                    hasEnteredInFlight = true;
+                }
+
+                lastReportedError = null;
+
+                // Broadcast the latest position to every subscriber.
+                const message = JSON.stringify({
+                    type: "POSITION",
+                    flightId,
+                    progress,
+                    latitude: savedLatitude,
+                    longitude: savedLongitude,
+                    status: savedStatus
+                });
+
+                broadcastToFlightSubscribers(flightId, message);
+
+                if (savedStatus.toLowerCase() === "landed") {
+                    const landedMessage = JSON.stringify({
+                        type: "FLIGHT_LANDED",
+                        flightId
                     });
 
-                    if (savedPosition.status === "Landed") {
-                        getFlightSubscribers(flightId).forEach((clientId: string) => {
-                            getSockets(clientId).forEach((clientSocket) => {
-                                if (clientSocket.readyState === WebSocket.OPEN) {
-                                    clientSocket.send(JSON.stringify({
-                                        type: "FLIGHT_LANDED",
-                                        flightId,
-                                        flightNumber
-                                    }));
-                                }
-                            });
-                        });
-                        if (timer) clearTimeout(timer);
-                        flightSimulationTimers.delete(flightId);
-                        info(`Flight ${flightId} landed. Simulation stopped.`);
-                        return;
-                    }
+                    broadcastToFlightSubscribers(flightId, landedMessage);
+
+                    stopFlightLifecycle(flightId);
+
+                    info(`Flight ${flightId} landed. Simulation stopped.`);
+                    return;
                 }
             } catch (simulationError: unknown) {
-                if (!reportedPersistenceFailure) {
-                    reportFailure(`Flight ${flightId} is moving, but its position could not be saved: ${
-                        simulationError instanceof Error ? simulationError.message : "unknown error"
-                    }`);
-                    reportedPersistenceFailure = true;
+                const errorMessage = simulationError instanceof Error
+                    ? simulationError.message
+                    : "Unknown error";
+                if (errorMessage !== lastReportedError) {
+                    error(`Flight ${flightId} simulation error: ${errorMessage}`);
+                    broadcastToFlightSubscribers(flightId, JSON.stringify({
+                        type: "ERROR",
+                        message: `Flight ${flightId} update failed: ${errorMessage}`
+                    }));
+                    lastReportedError = errorMessage;
                 }
             }
 
-            timer = setTimeout(() => {
-                void updatePosition();
-            }, Math.min(FLIGHT_SIMULATION_TICK_MS, durationMilliseconds));
-            flightSimulationTimers.set(flightId, timer);
+            // Retry on the next tick, including after a temporary API failure.
+            if (flightLifecycles.get(key) === lifecycle) {
+                lifecycle.timer = setTimeout(() => {
+                    void updatePosition();
+                }, lastReportedError ? 1000 : FLIGHT_SIMULATION_TICK_MS);
+            }
         };
 
+        info(`Flight ${flightId}: simulation started/resumed.`);
+
+        // Immediately calculate and publish the correct current position.
         void updatePosition();
+
     } catch (simulationError: unknown) {
-        reportFailure(`Unable to start simulation for flight ${flightId}: ${
-            simulationError instanceof Error ? simulationError.message : "unknown error"
-        }`);
+        const errorMessage = simulationError instanceof Error
+            ? simulationError.message
+            : "Unknown error";
+        error(
+            `Unable to start simulation for flight ${flightId}: ${errorMessage}`
+        );
+        broadcastToFlightSubscribers(flightId, JSON.stringify({
+            type: "ERROR",
+            message: `Flight ${flightId} simulation failed: ${errorMessage}`
+        }));
+
+        stopFlightLifecycle(flightId);
     }
 }
 
@@ -494,14 +651,29 @@ async function handleBoard(data: any, { socket }: MessageContext) {
         return;
     }
 
+    const flightId = data?.flightId;
+    if (
+        (typeof flightId !== "number" && typeof flightId !== "string")
+        || !String(flightId).trim()
+        || !Number.isSafeInteger(Number(flightId))
+        || Number(flightId) <= 0
+    ) {
+        socket.send(JSON.stringify({
+            type: "ERROR",
+            message: "A valid flightId is required."
+        }));
+        return;
+    }
+
+    const normalizedFlightId = Number(flightId);
     const res: any = await request({
         type: "BoardFlight",
         api_key: socket.user.api_key,
-        flight_id: data.flightId
+        flight_id: normalizedFlightId
     });
 
     if (res.status === "success") {
-        const atcSockets = getFlightSubscribers(data.flightId);
+        const atcSockets = getFlightSubscribers(normalizedFlightId);
 
         atcSockets.forEach((id: string) => {
             getSockets(id).forEach((atcSocket) => {
@@ -509,7 +681,7 @@ async function handleBoard(data: any, { socket }: MessageContext) {
                 if (currentSocket.user?.role === "ATC" && currentSocket.readyState === WebSocket.OPEN) {
                     currentSocket.send(JSON.stringify({
                         type: "BOARDING_CONFIRMED",
-                        flightId: data.flightId,
+                        flightId: normalizedFlightId,
                         passenger: socket.user?.username
                     }));
                 }
@@ -519,7 +691,7 @@ async function handleBoard(data: any, { socket }: MessageContext) {
 
     socket.send(JSON.stringify({
         type: "BOARD_RESULT",
-        flightId: data.flightId,
+        flightId: normalizedFlightId,
         data: res
     }));
 }
@@ -548,10 +720,18 @@ export function initSocketServer(port: number, host: string = "0.0.0.0") {
 
         socket.on("message", (message: WebSocket.RawData) => {
             try {
-                const data = JSON.parse(message.toString());
-                if (!data.type) return;
+                const parsedData: unknown = JSON.parse(message.toString());
+                if (!isRecord(parsedData) || typeof parsedData.type !== "string") {
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: "ERROR",
+                            message: "Message must be a JSON object with a type."
+                        }));
+                    }
+                    return;
+                }
 
-                void Promise.resolve(handleMessage(data.type, data, context)).catch((messageError: unknown) => {
+                void Promise.resolve(handleMessage(parsedData.type, parsedData, context)).catch((messageError: unknown) => {
                     const errorMessage = messageError instanceof Error
                         ? messageError.message
                         : "Unable to process the socket message.";
@@ -560,8 +740,18 @@ export function initSocketServer(port: number, host: string = "0.0.0.0") {
                         socket.send(JSON.stringify({ type: "ERROR", message: errorMessage }));
                     }
                 });
-            } catch {
-                error("Invalid JSON received");
+            } catch (parseError: unknown) {
+                error(
+                    parseError instanceof Error
+                        ? `Invalid JSON received: ${parseError.message}`
+                        : "Invalid JSON received"
+                );
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: "ERROR",
+                        message: "Invalid JSON message."
+                    }));
+                }
             }
         });
 
