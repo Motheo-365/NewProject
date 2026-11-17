@@ -10,7 +10,7 @@
 */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.execute = execute;
-const { getSocket, removeUser } = require("../state/serverState");
+const { getSockets, removeUser } = require("../state/serverState");
 function execute(args) {
     const username = args[0];
     // Validate input
@@ -20,24 +20,23 @@ function execute(args) {
     }
     console.log(`[KILL COMMAND] Attempting to disconnect user: ${username}`);
     // Get the user’s socket
-    const socket = getSocket(username);
-    if (!socket) {
+    const sockets = getSockets(username);
+    if (sockets.length === 0) {
         console.log(`[ERROR] User ${username} not found or not connected`);
         return;
     }
-    try {
-        // Notify user BEFORE closing
-        socket.send(JSON.stringify({
-            type: "KILLED",
-            message: "You have been disconnected by the server"
-        }));
-        // Close connection
-        socket.close();
-        // Remove from state
-        removeUser(username);
-        console.log(`[SUCCESS] User ${username} disconnected`);
+    for (const socket of sockets) {
+        try {
+            socket.send(JSON.stringify({
+                type: "KILLED",
+                message: "You have been disconnected by the server"
+            }));
+            socket.close();
+        }
+        catch {
+            console.log(`[ERROR] Failed to disconnect a session for ${username}`);
+        }
     }
-    catch (err) {
-        console.log(`[ERROR] Failed to disconnect ${username}`);
-    }
+    removeUser(username);
+    console.log(`[SUCCESS] User ${username} disconnected`);
 }

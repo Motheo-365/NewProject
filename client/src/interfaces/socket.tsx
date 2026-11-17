@@ -31,6 +31,19 @@ export interface AuthSuccessMessage {
     role: string;
 }
 
+export interface ConnectedUser {
+    username: string;
+    role: 'ATC' | 'PASSENGER' | null;
+    connections: number;
+}
+
+export interface ConnectedUsersMessage {
+    type: 'CONNECTED_USERS';
+    count: number;
+    connections: number;
+    users: ConnectedUser[];
+}
+
 export interface AuthFailedMessage {
     type: 'AUTH_FAILED';
     message: string;
@@ -95,6 +108,7 @@ export interface SocketClosedMessage {
 
 export type SocketServerMessage =
     | AuthSuccessMessage
+    | ConnectedUsersMessage
     | AuthFailedMessage
     | FlightUpdateMessage
     | TrackSuccessMessage
@@ -108,6 +122,7 @@ export type SocketServerMessage =
 
 export interface SocketEventMap {
     AUTH_SUCCESS: AuthSuccessMessage;
+    CONNECTED_USERS: ConnectedUsersMessage;
     AUTH_FAILED: AuthFailedMessage;
     TRACK_SUCCESS: TrackSuccessMessage;
     FLIGHT_UPDATE: FlightUpdateMessage;

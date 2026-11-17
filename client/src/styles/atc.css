@@ -136,6 +136,47 @@
   color: #8a5a0a;
 }
 
+.atc-page .atc-connected-users {
+  max-width: 1440px;
+  margin: -8px auto 18px;
+  color: #30465a;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.atc-page .atc-connected-users summary {
+  display: inline-block;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.atc-page .atc-connected-users ul {
+  display: inline-grid;
+  min-width: min(100%, 340px);
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #d7e2eb;
+  border-radius: 8px;
+  background: #fff;
+  list-style: none;
+  text-align: left;
+}
+
+.atc-page .atc-connected-users li {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.atc-page .atc-connected-users li span:last-child {
+  color: #607387;
+}
+
+.atc-page .atc-connected-users p {
+  margin: 8px 0 0;
+}
+
 .atc-page > .flight-map-section {
   margin: 0 auto 28px;
 }

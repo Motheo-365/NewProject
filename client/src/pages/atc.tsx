@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Flight } from '../interfaces/api';
+import type { ConnectedUser } from '../interfaces/socket';
 import FlightMap from '../components/map';
 import Loader from '../components/Loader';
 import ConfirmationBox from '../components/confirmationBox';
@@ -32,6 +33,8 @@ export default function AtcPage() {
   const [isTracking, setIsTracking] = useState(false);
   const [isLogoutConfirmationOpen, setIsLogoutConfirmationOpen] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(() => socketService.isConnected());
+  const [connectedUsers, setConnectedUsers] = useState<ConnectedUser[]>([]);
+  const [connectionCount, setConnectionCount] = useState(0);
   const [boardingCountdown, setBoardingCountdown] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -165,6 +168,11 @@ export default function AtcPage() {
       setError('');
     });
 
+    const unsubscribeConnectedUsers = socketService.on('CONNECTED_USERS', (message) => {
+      setConnectedUsers(message.users);
+      setConnectionCount(message.connections);
+    });
+
     const unsubscribeFlightUpdate = socketService.on('FLIGHT_UPDATE', (message) => {
       const updateFlight = (flight: Flight): Flight => (
         flight.id === message.flightId
@@ -279,6 +287,8 @@ export default function AtcPage() {
       setIsSocketConnected(false);
       trackedFlightIdsRef.current.clear();
       setIsTracking(false);
+      setConnectedUsers([]);
+      setConnectionCount(0);
       setError('Live flight connection lost. Reconnecting…');
     });
 
@@ -297,6 +307,7 @@ export default function AtcPage() {
       unsubscribeSocketClosed();
       unsubscribeSocketError();
       unsubscribeAuthSuccess();
+      unsubscribeConnectedUsers();
       boardingTimers.forEach((timer) => window.clearTimeout(timer));
       boardingTimers.clear();
       boardingDeadlines.clear();
@@ -399,11 +410,28 @@ export default function AtcPage() {
       {error && <p className="atc-error" role="alert">{error}</p>}
       <p className={`atc-connection-status ${isSocketConnected ? 'is-connected' : 'is-disconnected'}`} role="status">
         {isSocketConnected
-          ? 'Live operations connected'
+          ? `Live operations connected · ${connectedUsers.length} users · ${connectionCount} connections`
           : error
             ? 'Live operations disconnected. Reconnecting…'
             : 'Connecting to live operations…'}
       </p>
+      {isSocketConnected && (
+        <details className="atc-connected-users">
+          <summary>Connected users ({connectedUsers.length})</summary>
+          {connectedUsers.length > 0 ? (
+            <ul>
+              {connectedUsers.map((user) => (
+                <li key={`${user.username}-${user.role}`}>
+                  <span>{user.username}</span>
+                  <span>{user.role ?? 'Unknown'}{user.connections > 1 ? ` · ${user.connections} connections` : ''}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No users are currently connected.</p>
+          )}
+        </details>
+      )}
       <FlightMap apiKey={apiKey} activeFlight={selectedFlight} />
 
       <section className="dashboard">

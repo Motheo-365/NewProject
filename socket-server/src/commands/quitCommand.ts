@@ -1,12 +1,12 @@
-const { getState, shutdown } = require("../state/serverState");
+const { getState, getAllSockets, shutdown } = require("../state/serverState");
 
 export function execute() {
     console.log("[SERVER] Broadcasting shutdown message...");
 
     const state = getState();
-    const sockets = state.sockets;
+    const sockets = getAllSockets();
 
-    sockets.forEach((socket: { send(data: string): void; close(): void }, username: string) => {
+    sockets.forEach((socket: { send(data: string): void; close(): void }) => {
         try {
             // Notify client
             socket.send(JSON.stringify({
@@ -19,13 +19,13 @@ export function execute() {
                 try {
                     socket.close();
                 } catch (err) {
-                    console.log(`[ERROR] Failed to close socket for ${username}`);
+                    console.log("[ERROR] Failed to close a client socket");
                 }
 
             }, 100);
 
         } catch (err) {
-            console.log(`[ERROR] Failed to notify ${username}`);
+            console.log("[ERROR] Failed to notify a client socket");
         }
     });
 

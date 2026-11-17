@@ -12,6 +12,22 @@ const flightSimulationTimers = new Map();
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
 const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
+function broadcastConnectedUsers() {
+    const users = (0, serverState_1.getConnectedUsers)();
+    const message = JSON.stringify({
+        type: "CONNECTED_USERS",
+        count: users.length,
+        connections: users.reduce((total, user) => total + user.connections, 0),
+        users
+    });
+    users
+        .filter((user) => user.role === "ATC")
+        .flatMap((user) => (0, serverState_1.getSockets)(user.username))
+        .forEach((socket) => {
+        if (socket.readyState === ws_1.default.OPEN)
+            socket.send(message);
+    });
+}
 function isRecord(value) {
     return typeof value === "object" && value !== null;
 }
@@ -124,6 +140,7 @@ async function handleAuth(data, { socket, setUsername }) {
             role
         }));
         (0, logger_1.info)(`User authenticated: ${user.username} (${role})`);
+        broadcastConnectedUsers();
     }
     catch (err) {
         (0, logger_1.error)(err.message);
@@ -210,14 +227,15 @@ async function handleDispatch(data, { socket }) {
         passengers.forEach((passenger) => {
             if (!isRecord(passenger) || typeof passenger.username !== "string")
                 return;
-            const passengerSocket = (0, serverState_1.getSocket)(passenger.username);
-            if (passengerSocket?.readyState === ws_1.default.OPEN) {
-                passengerSocket.send(JSON.stringify({
-                    type: "BOARDING_CALL",
-                    flightId: data.flightId,
-                    ...(dispatchedAt ? { dispatchedAt } : {})
-                }));
-            }
+            (0, serverState_1.getSockets)(passenger.username).forEach((passengerSocket) => {
+                if (passengerSocket.readyState === ws_1.default.OPEN) {
+                    passengerSocket.send(JSON.stringify({
+                        type: "BOARDING_CALL",
+                        flightId: data.flightId,
+                        ...(dispatchedAt ? { dispatchedAt } : {})
+                    }));
+                }
+            });
         });
         if (socket.readyState === ws_1.default.OPEN) {
             socket.send(JSON.stringify({
@@ -316,26 +334,28 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                         flightStartedAt = Date.now();
                     }
                     (0, serverState_1.getFlightSubscribers)(flightId).forEach((clientId) => {
-                        const clientSocket = (0, serverState_1.getSocket)(clientId);
-                        if (clientSocket?.readyState === ws_1.default.OPEN) {
-                            clientSocket.send(JSON.stringify({
-                                type: "POSITION",
-                                flightId,
-                                progress,
-                                ...savedPosition
-                            }));
-                        }
+                        (0, serverState_1.getSockets)(clientId).forEach((clientSocket) => {
+                            if (clientSocket.readyState === ws_1.default.OPEN) {
+                                clientSocket.send(JSON.stringify({
+                                    type: "POSITION",
+                                    flightId,
+                                    progress,
+                                    ...savedPosition
+                                }));
+                            }
+                        });
                     });
                     if (savedPosition.status === "Landed") {
                         (0, serverState_1.getFlightSubscribers)(flightId).forEach((clientId) => {
-                            const clientSocket = (0, serverState_1.getSocket)(clientId);
-                            if (clientSocket?.readyState === ws_1.default.OPEN) {
-                                clientSocket.send(JSON.stringify({
-                                    type: "FLIGHT_LANDED",
-                                    flightId,
-                                    flightNumber
-                                }));
-                            }
+                            (0, serverState_1.getSockets)(clientId).forEach((clientSocket) => {
+                                if (clientSocket.readyState === ws_1.default.OPEN) {
+                                    clientSocket.send(JSON.stringify({
+                                        type: "FLIGHT_LANDED",
+                                        flightId,
+                                        flightNumber
+                                    }));
+                                }
+                            });
                         });
                         if (timer)
                             clearTimeout(timer);
@@ -385,14 +405,16 @@ async function handleBoard(data, { socket }) {
     if (res.status === "success") {
         const atcSockets = (0, serverState_1.getFlightSubscribers)(data.flightId);
         atcSockets.forEach((id) => {
-            const s = (0, serverState_1.getSocket)(id);
-            if (s && s.user?.role === "ATC") {
-                s.send(JSON.stringify({
-                    type: "BOARDING_CONFIRMED",
-                    flightId: data.flightId,
-                    passenger: socket.user?.username
-                }));
-            }
+            (0, serverState_1.getSockets)(id).forEach((atcSocket) => {
+                const currentSocket = atcSocket;
+                if (currentSocket.user?.role === "ATC" && currentSocket.readyState === ws_1.default.OPEN) {
+                    currentSocket.send(JSON.stringify({
+                        type: "BOARDING_CONFIRMED",
+                        flightId: data.flightId,
+                        passenger: socket.user?.username
+                    }));
+                }
+            });
         });
     }
     socket.send(JSON.stringify({
@@ -437,8 +459,10 @@ function initSocketServer(port, host = "0.0.0.0") {
             }
         });
         socket.on("close", () => {
-            if (username)
-                (0, serverState_1.removeUser)(username);
+            if (username) {
+                (0, serverState_1.removeUser)(username, socket);
+                broadcastConnectedUsers();
+            }
         });
         socket.on("error", (err) => {
             (0, logger_1.error)(err.message);
