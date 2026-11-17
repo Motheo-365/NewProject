@@ -4,10 +4,11 @@ import LoginPage from '../pages/login';
 import AtcPage from '../pages/atc';
 import Passenger from '../pages/passenger';
 import { getApiKey } from '../services/apiKeyCookie';
+import { getCurrentUser } from '../services/userSession';
 
 function RolePage({ role, children }: { role: 'ATC' | 'Passenger'; children?: ReactNode }) {
   const apiKey = getApiKey();
-  const userType = localStorage.getItem('user_type');
+  const userType = getCurrentUser()?.type;
 
   if (!apiKey || (userType !== 'ATC' && userType !== 'Passenger')) {
     return <Navigate to="/" replace />;

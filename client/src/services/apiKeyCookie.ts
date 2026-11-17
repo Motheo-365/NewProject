@@ -1,8 +1,7 @@
+const SESSION_STORAGE_KEY = 'flight-tracking-session';
 const SESSION_COOKIE = 'flight-tracking-session';
 const LEGACY_API_KEY_COOKIE = 'flight-tracking-api-key';
-const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
 const LEGACY_API_KEY_STORAGE_KEY = 'api_key';
-const LEGACY_USER_STORAGE_KEY = 'flight-tracking-user';
 
 interface ApiKeySession {
   apiKey: string;
@@ -35,29 +34,31 @@ function isApiKeySession(value: unknown): value is ApiKeySession {
     && (session.type === 'ATC' || session.type === 'Passenger');
 }
 
-export function getApiKey(): string | null {
-  const cookie = readCookie(SESSION_COOKIE);
-  if (!cookie) return null;
+function readSessionStorage(): ApiKeySession | null {
+  const value = sessionStorage.getItem(SESSION_STORAGE_KEY);
+  if (!value) return null;
 
   try {
-    const parsed: unknown = JSON.parse(decodeURIComponent(cookie));
-    if (!isApiKeySession(parsed)) {
-      clearApiKey();
-      return null;
-    }
-
-    const username = localStorage.getItem('username');
-    const type = localStorage.getItem('user_type');
-    if (parsed.username !== username || parsed.type !== type) {
-      clearApiKey();
-      return null;
-    }
-
-    return parsed.apiKey;
+    const parsed: unknown = JSON.parse(value);
+    if (isApiKeySession(parsed)) return parsed;
   } catch {
-    clearApiKey();
-    return null;
+    // Remove malformed session data below.
   }
+
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  return null;
+}
+
+function writeSession(session: ApiKeySession): void {
+  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+export function getApiKey(): string | null {
+  return readSessionStorage()?.apiKey ?? null;
+}
+
+export function getApiKeySession(): ApiKeySession | null {
+  return readSessionStorage();
 }
 
 export function setApiKey(
@@ -74,52 +75,52 @@ export function setApiKey(
     throw new Error('Cannot save an API key without a valid user identity.');
   }
 
-  localStorage.setItem('username', session.username);
-  localStorage.setItem('user_type', session.type);
-  const value = encodeURIComponent(JSON.stringify(session));
-  document.cookie = `${encodeURIComponent(SESSION_COOKIE)}=${value}; ${getCookieAttributes(SESSION_MAX_AGE_SECONDS)}`;
-
+  writeSession(session);
   if (getApiKey() !== session.apiKey) {
     clearApiKey();
-    throw new Error('Unable to save the signed-in user API key in this browser.');
+    throw new Error('Unable to save the signed-in user API key in this browser tab.');
   }
-
-  document.cookie = `${encodeURIComponent(LEGACY_API_KEY_COOKIE)}=; ${getCookieAttributes(0)}`;
-  localStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
 }
 
 export function clearApiKey(): void {
-  document.cookie = `${encodeURIComponent(SESSION_COOKIE)}=; ${getCookieAttributes(0)}`;
-  document.cookie = `${encodeURIComponent(LEGACY_API_KEY_COOKIE)}=; ${getCookieAttributes(0)}`;
-  localStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
 export function migrateLegacyApiKey(): void {
-  const legacySession = localStorage.getItem(LEGACY_USER_STORAGE_KEY);
-  if (legacySession) {
-    try {
-      const parsed: unknown = JSON.parse(legacySession);
-      if (typeof parsed === 'object' && parsed !== null && 'api_key' in parsed) {
-        const userProfile = Object.fromEntries(
-          Object.entries(parsed).filter(([key]) => key !== 'api_key'),
-        );
-        localStorage.setItem(LEGACY_USER_STORAGE_KEY, JSON.stringify(userProfile));
+  if (!getApiKeySession()) {
+    const username = localStorage.getItem('username');
+    const type = localStorage.getItem('user_type');
+
+    if (username && (type === 'ATC' || type === 'Passenger')) {
+      const sessionCookie = readCookie(SESSION_COOKIE);
+      if (sessionCookie) {
+        try {
+          const parsed: unknown = JSON.parse(decodeURIComponent(sessionCookie));
+          if (
+            isApiKeySession(parsed)
+            && parsed.username === username
+            && parsed.type === type
+          ) {
+            writeSession(parsed);
+          }
+        } catch {
+          // A malformed legacy cookie is discarded after migration.
+        }
       }
-    } catch {
-      localStorage.removeItem(LEGACY_USER_STORAGE_KEY);
+
+      if (!getApiKeySession()) {
+        const legacyApiKey = localStorage.getItem(LEGACY_API_KEY_STORAGE_KEY)
+          ?? readCookie(LEGACY_API_KEY_COOKIE);
+        if (legacyApiKey) {
+          setApiKey(legacyApiKey, username, type);
+        }
+      }
     }
   }
 
-  const legacyApiKey = localStorage.getItem(LEGACY_API_KEY_STORAGE_KEY);
-  if (legacyApiKey || readCookie(LEGACY_API_KEY_COOKIE)) {
-    clearApiKey();
-    localStorage.removeItem('username');
-    localStorage.removeItem('user_type');
-  }
-
-  if (readCookie(SESSION_COOKIE) && !getApiKey()) {
-    clearApiKey();
-    localStorage.removeItem('username');
-    localStorage.removeItem('user_type');
-  }
+  document.cookie = `${encodeURIComponent(SESSION_COOKIE)}=; ${getCookieAttributes(0)}`;
+  document.cookie = `${encodeURIComponent(LEGACY_API_KEY_COOKIE)}=; ${getCookieAttributes(0)}`;
+  localStorage.removeItem(LEGACY_API_KEY_STORAGE_KEY);
+  localStorage.removeItem('username');
+  localStorage.removeItem('user_type');
 }

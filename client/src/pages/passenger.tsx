@@ -3,9 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FlightMap from '../components/map';
 import Loader from '../components/Loader';
 import type { Flight } from '../interfaces/api';
-import { clearApiKey, getApiKey } from '../services/apiKeyCookie';
+import { getApiKey } from '../services/apiKeyCookie';
 import { apiService } from '../services/apiService';
 import { socketService } from '../services/socketService';
+import { clearCurrentUser } from '../services/userSession';
 
 import '../styles/passenger.css';
 
@@ -279,9 +280,7 @@ export function Passenger() {
 
   const handleLogout = () => {
     socketService.disconnect();
-    clearApiKey();
-    localStorage.removeItem('user_type');
-    localStorage.removeItem('username');
+    clearCurrentUser();
     window.location.assign('/');
   };
 

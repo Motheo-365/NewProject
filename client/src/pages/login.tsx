@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 
 import Loader from '../components/Loader';
 import type { LoginResponse } from '../interfaces/api';
-import { setApiKey } from '../services/apiKeyCookie';
+import { saveCurrentUser } from '../services/userSession';
 import { apiService } from '../services/apiService';
 import { socketService } from '../services/socketService';
 
@@ -81,7 +81,7 @@ export default function LoginPage() {
       }
 
       socketService.disconnect();
-      setApiKey(user.api_key, user.username, userType);
+      saveCurrentUser({ ...user, type: normalizedRole });
       navigate(userType === 'ATC' ? '/atc' : '/passenger');
     } catch (loginError: unknown) {
       setError(
