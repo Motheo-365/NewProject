@@ -32,6 +32,54 @@ function getBearingDegrees(
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
+function isValidPosition(
+  position: { latitude: number | null; longitude: number | null },
+): position is { latitude: number; longitude: number } {
+  return typeof position.latitude === 'number'
+    && Number.isFinite(position.latitude)
+    && position.latitude >= -90
+    && position.latitude <= 90
+    && typeof position.longitude === 'number'
+    && Number.isFinite(position.longitude)
+    && position.longitude >= -180
+    && position.longitude <= 180;
+}
+
+function getRoutePosition(route: [number, number][], progress: number): L.LatLng {
+  const scaledIndex = Math.min(Math.max(progress, 0), 1) * (route.length - 1);
+  const startIndex = Math.floor(scaledIndex);
+  const endIndex = Math.min(startIndex + 1, route.length - 1);
+  const fraction = scaledIndex - startIndex;
+  const [startLatitude, startLongitude] = route[startIndex];
+  const [endLatitude, endLongitude] = route[endIndex];
+
+  return L.latLng(
+    startLatitude + (endLatitude - startLatitude) * fraction,
+    startLongitude + (endLongitude - startLongitude) * fraction,
+  );
+}
+
+function getClosestRouteProgress(
+  route: [number, number][],
+  position: L.LatLng,
+): number {
+  let closestIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  route.forEach(([latitude, longitude], index) => {
+    const latitudeDifference = latitude - position.lat;
+    const longitudeDifference = (longitude - position.lng)
+      * Math.cos(position.lat * Math.PI / 180);
+    const distance = latitudeDifference ** 2 + longitudeDifference ** 2;
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  });
+
+  return route.length > 1 ? closestIndex / (route.length - 1) : 0;
+}
+
 function Map({ apiKey, activeFlight }: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -41,7 +89,7 @@ function Map({ apiKey, activeFlight }: MapProps) {
   const aircraftMarkerRef = useRef<L.Marker | null>(null);
   const positionAnimationFrameRef = useRef<number | null>(null);
   const markerFlightIdRef = useRef<number | null>(null);
-  const markerProgressRef = useRef(0);
+  const markerProgressRef = useRef<number | null>(null);
   const [airports, setAirports] = useState<Airport[]>([]);
   const [flights, setFlights] = useState<Flight[]>([]);
   const [localSelectedFlightId, setLocalSelectedFlightId] = useState<string>('');
@@ -253,30 +301,17 @@ function Map({ apiKey, activeFlight }: MapProps) {
       lineJoin: 'round',
     }).addTo(layers);
 
-    map.fitBounds(routeLine.getBounds(), { padding: [36, 36], maxZoom: 6 });
+    map.fitBounds(routeLine.getBounds(), {
+      padding: [56, 56],
+      maxZoom: 8,
+      animate: false,
+    });
+    map.setZoom(Math.max(map.getZoom(), 5), { animate: false });
   }, [selectedRoute]);
 
   useEffect(() => {
     const layers = aircraftLayersRef.current;
-    if (!layers || !selectedRoute || !trackedPosition) return;
-    if (typeof trackedPosition.progress !== 'number' || !Number.isFinite(trackedPosition.progress)) return;
-
-    const latitude = trackedPosition.latitude;
-    const longitude = trackedPosition.longitude;
-    if (
-      typeof latitude !== 'number'
-      || !Number.isFinite(latitude)
-      || latitude < -90
-      || latitude > 90
-      || typeof longitude !== 'number'
-      || !Number.isFinite(longitude)
-      || longitude < -180
-      || longitude > 180
-    ) {
-      return;
-    }
-
-    const progress = Math.min(Math.max(trackedPosition.progress, 0), 1);
+    if (!layers || !selectedRoute?.geometry || !selectedRoute.origin || !trackedPosition) return;
 
     if (markerFlightIdRef.current !== trackedPosition.flightId) {
       if (positionAnimationFrameRef.current !== null) {
@@ -285,10 +320,19 @@ function Map({ apiKey, activeFlight }: MapProps) {
       layers.clearLayers();
       aircraftMarkerRef.current = null;
       markerFlightIdRef.current = trackedPosition.flightId;
-      markerProgressRef.current = 0;
+      markerProgressRef.current = null;
     }
 
     if (!aircraftMarkerRef.current) {
+      const currentPosition = {
+        latitude: trackedPosition.latitude,
+        longitude: trackedPosition.longitude,
+      };
+      const hasCurrentPosition = isValidPosition(currentPosition);
+      const initialPosition = hasCurrentPosition
+        ? L.latLng(currentPosition.latitude, currentPosition.longitude)
+        : L.latLng(selectedRoute.origin.latitude, selectedRoute.origin.longitude);
+
       const aircraftIcon = L.divIcon({
         className: 'aircraft-position-marker',
         html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16Z"/></svg>',
@@ -296,17 +340,29 @@ function Map({ apiKey, activeFlight }: MapProps) {
         iconAnchor: [16, 16],
       });
 
-      aircraftMarkerRef.current = L.marker([latitude, longitude], {
+      aircraftMarkerRef.current = L.marker(initialPosition, {
         icon: aircraftIcon,
         keyboard: true,
         title: `${selectedRoute.flightNumber} aircraft position`,
       })
         .bindTooltip(selectedRoute.flightNumber, { direction: 'top', offset: [0, -12] })
         .addTo(layers);
-      markerProgressRef.current = progress;
-      return;
+      markerProgressRef.current = hasCurrentPosition
+        ? getClosestRouteProgress(selectedRoute.geometry, initialPosition)
+        : 0;
+      mapRef.current?.panInside(initialPosition, {
+        paddingTopLeft: [88, 88],
+        paddingBottomRight: [88, 88],
+        animate: false,
+      });
     }
 
+    if (
+      typeof trackedPosition.progress !== 'number'
+      || !Number.isFinite(trackedPosition.progress)
+    ) return;
+
+    const progress = Math.min(Math.max(trackedPosition.progress, 0), 1);
     if (positionAnimationFrameRef.current !== null) {
       cancelAnimationFrame(positionAnimationFrameRef.current);
       positionAnimationFrameRef.current = null;
@@ -314,29 +370,40 @@ function Map({ apiKey, activeFlight }: MapProps) {
 
     const marker = aircraftMarkerRef.current;
     const start = marker.getLatLng();
-    const startingProgress = markerProgressRef.current;
+    const startingProgress = markerProgressRef.current ?? getClosestRouteProgress(
+      selectedRoute.geometry,
+      start,
+    );
     const targetProgress = Math.max(startingProgress, progress);
-    const duration = Math.max(
-      (targetProgress - startingProgress) * selectedRoute.durationHours * 1000,
-      80,
+    const duration = Math.min(
+      Math.max(
+        (targetProgress - startingProgress) * selectedRoute.durationHours * 60_000,
+        250,
+      ),
+      750,
     );
     const startedAt = performance.now();
 
     const animatePosition = (now: number) => {
       const animationProgress = Math.min((now - startedAt) / duration, 1);
-      const nextLatitude = start.lat + (latitude - start.lat) * animationProgress;
-      const nextLongitude = start.lng + (longitude - start.lng) * animationProgress;
-      marker.setLatLng([nextLatitude, nextLongitude]);
-      markerProgressRef.current = startingProgress
+      const nextProgress = startingProgress
         + (targetProgress - startingProgress) * animationProgress;
+      const nextPosition = getRoutePosition(selectedRoute.geometry, nextProgress);
+      marker.setLatLng(nextPosition);
+      markerProgressRef.current = nextProgress;
+      mapRef.current?.panInside(nextPosition, {
+        paddingTopLeft: [88, 88],
+        paddingBottomRight: [88, 88],
+        animate: false,
+      });
 
       if (
         selectedRoute.destination
         && marker.getElement()
       ) {
         const bearing = getBearingDegrees(
-          nextLatitude,
-          nextLongitude,
+          nextPosition.lat,
+          nextPosition.lng,
           selectedRoute.destination.latitude,
           selectedRoute.destination.longitude,
         );
