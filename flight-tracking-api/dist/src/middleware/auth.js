@@ -18,7 +18,11 @@ const authenticate = async (req, res, next) => {
         if (result.rows.length === 0) {
             return (0, response_1.sendResponse)(res, 'error', 'invalid api key', null, 401);
         }
-        req.user = result.rows[0];
+        const user = result.rows[0];
+        req.user = {
+            ...user,
+            type: typeof user.type === 'string' ? user.type.trim().toUpperCase() : user.type,
+        };
         next();
     }
     catch (err) {

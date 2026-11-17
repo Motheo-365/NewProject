@@ -162,6 +162,7 @@ export default function AtcPage() {
 
     const unsubscribeAuthSuccess = socketService.on('AUTH_SUCCESS', () => {
       setIsSocketConnected(true);
+      setError('');
     });
 
     const unsubscribeFlightUpdate = socketService.on('FLIGHT_UPDATE', (message) => {
@@ -174,6 +175,7 @@ export default function AtcPage() {
                 latitude: message.latitude,
                 longitude: message.longitude,
               },
+              progress: message.progress,
             }
           : flight
       );
@@ -277,6 +279,7 @@ export default function AtcPage() {
       setIsSocketConnected(false);
       trackedFlightIdsRef.current.clear();
       setIsTracking(false);
+      setError('Live flight connection lost. Reconnecting…');
     });
 
     const unsubscribeSocketError = socketService.on('ERROR', (message) => {
@@ -395,7 +398,11 @@ export default function AtcPage() {
 
       {error && <p className="atc-error" role="alert">{error}</p>}
       <p className={`atc-connection-status ${isSocketConnected ? 'is-connected' : 'is-disconnected'}`} role="status">
-        {isSocketConnected ? 'Live operations connected' : 'Connecting to live operations…'}
+        {isSocketConnected
+          ? 'Live operations connected'
+          : error
+            ? 'Live operations disconnected. Reconnecting…'
+            : 'Connecting to live operations…'}
       </p>
       <FlightMap apiKey={apiKey} activeFlight={selectedFlight} />
 

@@ -29,7 +29,14 @@ function formatStatus(status: string): string {
   return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function updateFlight(flight: Flight, flightId: number, status: string, latitude?: number, longitude?: number): Flight {
+function updateFlight(
+  flight: Flight,
+  flightId: number,
+  status: string,
+  latitude?: number,
+  longitude?: number,
+  progress?: number,
+): Flight {
   if (flight.id !== flightId) return flight;
 
   const bookingStatus = flight.booking_details?.status.toUpperCase();
@@ -47,6 +54,7 @@ function updateFlight(flight: Flight, flightId: number, status: string, latitude
       latitude: latitude ?? flight.current_position.latitude,
       longitude: longitude ?? flight.current_position.longitude,
     },
+    ...(progress !== undefined ? { progress } : {}),
     ...(flight.booking_details
       ? { booking_details: { ...flight.booking_details, status: updatedBookingStatus ?? flight.booking_details.status } }
       : {}),
@@ -149,6 +157,7 @@ export function Passenger() {
         if (!active) return;
         isAuthenticatedRef.current = true;
         setIsSocketConnected(true);
+        setError('');
         const selectedId = selectedFlightIdRef.current;
         if (selectedId !== null) requestTracking(selectedId);
       }),
@@ -164,6 +173,7 @@ export function Passenger() {
         requestedTrackingIdRef.current = null;
         setIsSocketConnected(false);
         setIsTracking(false);
+        setError('Live flight connection lost. Reconnecting…');
       }),
       socketService.on('TRACK_SUCCESS', (message) => {
         if (!active || message.flightId !== selectedFlightIdRef.current) return;
@@ -212,7 +222,14 @@ export function Passenger() {
       socketService.on('FLIGHT_UPDATE', (message) => {
         if (!active) return;
         setFlights((current) => current.map((flight) => (
-          updateFlight(flight, message.flightId, message.status, message.latitude, message.longitude)
+          updateFlight(
+            flight,
+            message.flightId,
+            message.status,
+            message.latitude,
+            message.longitude,
+            message.progress,
+          )
         )));
       }),
       socketService.on('FLIGHT_LANDED', (message) => {
@@ -387,6 +404,7 @@ export function Passenger() {
                       type="button"
                       className="passenger-track-button"
                       aria-pressed={isSelected && isTracking}
+                      disabled={!isSocketConnected}
                       onClick={() => handleTrackFlight(flight.id)}
                     >
                       {isSelected && isTracking ? 'Tracking flight' : 'Track this flight'}
@@ -410,6 +428,12 @@ export function Passenger() {
                 <span>Current status</span>
                 <strong>{formatStatus(selectedFlight.status)}</strong>
               </div>
+              {typeof selectedFlight.progress === 'number' && (
+                <div className="passenger-selected-status">
+                  <span>Flight progress</span>
+                  <strong>{Math.round(selectedFlight.progress * 100)}%</strong>
+                </div>
+              )}
               <div className="passenger-coordinates" aria-live="polite">
                 <span>Current position</span>
                 {typeof selectedFlight.current_position.latitude === 'number'

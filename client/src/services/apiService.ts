@@ -1,5 +1,6 @@
 import type {
   ApiResponse,
+  AirportsData,
   Flight,
   FlightsData,
   LoginRequest,
@@ -162,6 +163,15 @@ export class ApiService {
     });
 
     return await this.parseJsonResponse<ApiResponse<Flight>>(res);
+  }
+
+  async getAirports(): Promise<ApiResponse<AirportsData>> {
+    const res = await fetch(`${this.API_URL}/airports`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    return await this.parseJsonResponse<ApiResponse<AirportsData>>(res);
   }
 }
 

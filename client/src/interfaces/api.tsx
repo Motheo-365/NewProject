@@ -54,6 +54,7 @@ export interface Flight {
   status: string;
 
   current_position: Coordinates;
+  progress?: number;
 
   origin: Airport;
   destination: Airport;
@@ -68,6 +69,8 @@ export interface Flight {
   passengers?: Passenger[];
   passenger_count?: number;
 }
+
+export type AirportsData = Airport[];
 
 // Payload returned by GetAllFlights.
 export interface FlightsData {

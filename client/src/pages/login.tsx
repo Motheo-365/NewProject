@@ -71,10 +71,17 @@ export default function LoginPage() {
       }
 
       const userType = normalizedRole === 'ATC' ? 'ATC' : 'Passenger';
+      const profileResponse = await apiService.me(user.api_key);
+      if (profileResponse.status !== 'success' || !profileResponse.data) {
+        throw new Error(profileResponse.message || 'Unable to verify the API key returned by login.');
+      }
+      if (profileResponse.data.username !== user.username
+        || profileResponse.data.type.trim().toUpperCase() !== normalizedRole) {
+        throw new Error('The API key returned by login does not belong to this user. Please try again or contact support.');
+      }
+
       socketService.disconnect();
-      setApiKey(user.api_key);
-      localStorage.setItem('user_type', userType);
-      localStorage.setItem('username', user.username);
+      setApiKey(user.api_key, user.username, userType);
       navigate(userType === 'ATC' ? '/atc' : '/passenger');
     } catch (loginError: unknown) {
       setError(

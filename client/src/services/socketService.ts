@@ -51,6 +51,7 @@ function readFlightUpdate(value: Record<string, unknown>): SocketServerMessage |
   const flightId = readFiniteNumber(rawFlightId);
   const latitude = readFiniteNumber(rawLatitude);
   const longitude = readFiniteNumber(rawLongitude);
+  const progress = readFiniteNumber(value.progress ?? data.progress);
   const status = value.status ?? data.status;
 
   if (
@@ -62,6 +63,9 @@ function readFlightUpdate(value: Record<string, unknown>): SocketServerMessage |
     || longitude === null
     || longitude < -180
     || longitude > 180
+    || progress === null
+    || progress < 0
+    || progress > 1
     || typeof status !== 'string'
     || !status.trim()
   ) {
@@ -74,6 +78,7 @@ function readFlightUpdate(value: Record<string, unknown>): SocketServerMessage |
     latitude,
     longitude,
     status,
+    progress,
   };
 }
 
@@ -88,8 +93,9 @@ function parseServerMessage(value: unknown): SocketServerMessage | null {
     case 'AUTH_FAILED':
     case 'ERROR':
     case 'KILLED':
+    case 'SHUTDOWN':
       return typeof value.message === 'string'
-        ? { type: value.type, message: value.message }
+        ? { type: value.type === 'SHUTDOWN' ? 'KILLED' : value.type, message: value.message }
         : null;
     case 'TRACK_SUCCESS':
       return typeof value.flightId === 'number'
@@ -111,6 +117,7 @@ function parseServerMessage(value: unknown): SocketServerMessage | null {
         : null;
     case 'FLIGHT_UPDATE':
     case 'flight_update':
+    case 'POSITION':
       return readFlightUpdate(value);
     case 'DISPATCH_RESULT':
       return isApiResponse(value.data)
@@ -135,6 +142,8 @@ function parseServerMessage(value: unknown): SocketServerMessage | null {
 
 class SocketService {
   private socket: WebSocket | null = null;
+  private reconnectEnabled = false;
+  private reconnectTimer: number | null = null;
   private listeners = new Map<keyof SocketEventMap, Set<(message: unknown) => void>>();
 
   on<K extends keyof SocketEventMap>(event: K, callback: EventListener<K>): () => void {
@@ -191,6 +200,8 @@ class SocketService {
         break;
       case 'KILLED':
         this.emit('KILLED', message);
+        this.reconnectEnabled = false;
+        this.emit('SOCKET_CLOSED', { type: 'SOCKET_CLOSED' });
         window.alert(message.message);
         this.disconnect();
         break;
@@ -198,14 +209,24 @@ class SocketService {
   }
 
   async connect(): Promise<void> {
-    this.disconnect();
+    if (this.socket?.readyState === WebSocket.OPEN) return;
+    this.reconnectEnabled = true;
+    await this.openSocket();
+  }
 
+  private async openSocket(): Promise<void> {
     const storedApiKey = getApiKey();
     if (!storedApiKey) {
       throw new Error('No API key is saved for the signed-in user. Log in again.');
     }
 
-    const socket = await connectToSocketServer();
+    const socket = await connectToSocketServer((message) => {
+      this.emit('ERROR', { type: 'ERROR', message });
+    });
+    if (!this.reconnectEnabled) {
+      socket.close();
+      return;
+    }
     this.socket = socket;
 
     socket.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -239,6 +260,19 @@ class SocketService {
       if (this.socket === socket) {
         this.socket = null;
         this.emit('SOCKET_CLOSED', { type: 'SOCKET_CLOSED' });
+        if (this.reconnectEnabled) {
+          this.reconnectTimer = window.setTimeout(() => {
+            this.reconnectTimer = null;
+            void this.openSocket().catch((connectError: unknown) => {
+              this.emit('ERROR', {
+                type: 'ERROR',
+                message: connectError instanceof Error
+                  ? connectError.message
+                  : 'Unable to reconnect to the flight service.',
+              });
+            });
+          }, 2_000);
+        }
       }
       console.log('WebSocket connection closed');
     });
@@ -277,6 +311,11 @@ class SocketService {
   }
 
   disconnect(): void {
+    this.reconnectEnabled = false;
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const socket = this.socket;
     this.socket = null;
     socket?.close();

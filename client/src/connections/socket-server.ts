@@ -47,7 +47,7 @@ function connectToServer(url: string): Promise<WebSocket> {
     });
 }
 
-export async function connectToSocketServer(): Promise<WebSocket> {
+export async function connectToSocketServer(onRetry?: (message: string) => void): Promise<WebSocket> {
     let retryDelay = INITIAL_RETRY_DELAY_MS;
 
     while (true) {
@@ -65,6 +65,7 @@ export async function connectToSocketServer(): Promise<WebSocket> {
             `WebSocket server is unreachable; retrying in ${Math.round(retryDelay / 1000)} seconds.`,
             failures,
         );
+        onRetry?.(`Flight service unavailable. Retrying in ${Math.round(retryDelay / 1000)} seconds.`);
 
         await new Promise<void>((resolve) => {
             window.setTimeout(resolve, retryDelay);

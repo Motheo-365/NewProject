@@ -11,7 +11,7 @@ const serverState_1 = require("../state/serverState");
 const flightSimulationTimers = new Map();
 const FLIGHT_SIMULATION_TICK_MS = 250;
 const BOARDING_WINDOW_MS = 60_000;
-const SIMULATED_MINUTES_PER_FLIGHT_HOUR = 1;
+const SIMULATED_SECONDS_PER_FLIGHT_HOUR = 1;
 function isRecord(value) {
     return typeof value === "object" && value !== null;
 }
@@ -157,7 +157,7 @@ async function handleTrack(data, { socket }) {
     if (res.status !== "success") {
         socket.send(JSON.stringify({
             type: "ERROR",
-            message: "Not allowed to track this flight"
+            message: res.message || "Unable to track this flight."
         }));
         return;
     }
@@ -272,7 +272,7 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
             || durationHours <= 0) {
             throw new Error("Flight route coordinates or duration are invalid.");
         }
-        const durationMilliseconds = Math.max(durationHours * SIMULATED_MINUTES_PER_FLIGHT_HOUR * 60_000, FLIGHT_SIMULATION_TICK_MS);
+        const durationMilliseconds = Math.max(durationHours * SIMULATED_SECONDS_PER_FLIGHT_HOUR * 1_000, 1);
         let flightStartedAt = null;
         let reportedPersistenceFailure = false;
         let timer;
@@ -319,8 +319,9 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
                         const clientSocket = (0, serverState_1.getSocket)(clientId);
                         if (clientSocket?.readyState === ws_1.default.OPEN) {
                             clientSocket.send(JSON.stringify({
-                                type: "FLIGHT_UPDATE",
+                                type: "POSITION",
                                 flightId,
+                                progress,
                                 ...savedPosition
                             }));
                         }
@@ -352,7 +353,7 @@ async function startFlightSimulation(flightId, apiKey, controllerSocket) {
             }
             timer = setTimeout(() => {
                 void updatePosition();
-            }, FLIGHT_SIMULATION_TICK_MS);
+            }, Math.min(FLIGHT_SIMULATION_TICK_MS, durationMilliseconds));
             flightSimulationTimers.set(flightId, timer);
         };
         void updatePosition();
@@ -421,7 +422,15 @@ function initSocketServer(port, host = "0.0.0.0") {
                 const data = JSON.parse(message.toString());
                 if (!data.type)
                     return;
-                handleMessage(data.type, data, context);
+                void Promise.resolve(handleMessage(data.type, data, context)).catch((messageError) => {
+                    const errorMessage = messageError instanceof Error
+                        ? messageError.message
+                        : "Unable to process the socket message.";
+                    (0, logger_1.error)(errorMessage);
+                    if (socket.readyState === ws_1.default.OPEN) {
+                        socket.send(JSON.stringify({ type: "ERROR", message: errorMessage }));
+                    }
+                });
             }
             catch {
                 (0, logger_1.error)("Invalid JSON received");
