@@ -16,7 +16,7 @@ export function calculateFlightDuration(lat1: number, lon1: number, lat2: number
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = earthRadius * c; // Distance in km
   
-  const averageSpeedKnots = 800; // km/h
+  const averageSpeedKnots = 500; // km/h
   const durationHours = distance / averageSpeedKnots;
   
   return parseFloat(durationHours.toFixed(2));
